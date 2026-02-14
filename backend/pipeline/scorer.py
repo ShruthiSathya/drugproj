@@ -4,22 +4,31 @@ from pipeline.graph_builder import KnowledgeGraphBuilder
 from models import DrugCandidate
 
 KNOWN_REPURPOSING = {
-    ("DB00331", "diabetes"): 1.0, ("DB00331", "cancer"): 0.7, ("DB00331", "aging"): 0.6,
-    ("DB00877", "cancer"): 0.8,   ("DB00877", "aging"): 0.7,
-    ("DB00203", "hypertension"): 0.9,
-    ("DB00945", "cardiovascular"): 0.9, ("DB00945", "cancer"): 0.5,
-    ("DB00313", "epilepsy"): 0.9, ("DB00313", "cancer"): 0.6,
-    ("DB01041", "myeloma"): 1.0,  ("DB01041", "cancer"): 0.7,
-    ("DB01234", "covid"): 0.8,    ("DB01234", "inflammation"): 0.9,
-    ("DB00619", "leukemia"): 1.0, ("DB00619", "cancer"): 0.7,
-    ("DB01356", "alzheimer"): 0.5,("DB01356", "parkinson"): 0.4,
-    ("DB01394", "gout"): 1.0,     ("DB01394", "cardiovascular"): 0.7,
-    ("DB06273", "arthritis"): 0.9,("DB06273", "cytokine"): 0.8,
-    ("DB00482", "cancer"): 0.6,
-    ("DB01076", "cardiovascular"): 0.95, ("DB01076", "cancer"): 0.4,
+    ("DB01235", "parkinson"): 1.0,  # Levodopa
+    ("DB01367", "parkinson"): 1.0,  # Rasagiline
+    ("DB01037", "parkinson"): 1.0,  # Selegiline
+    ("DB00331", "parkinson"): 0.7,  # Metformin
+    ("DB00331", "diabetes"): 1.0,
+    ("DB00331", "cancer"): 0.7,
+    ("DB00331", "aging"): 0.6,
+    ("DB00877", "parkinson"): 0.6,  # Rapamycin
+    ("DB00877", "cancer"): 0.8,
+    ("DB00877", "aging"): 0.7,
+    ("DB00619", "parkinson"): 0.5,  # Imatinib
+    ("DB04868", "parkinson"): 0.6,  # Nilotinib
+    ("DB01356", "parkinson"): 0.5,  # Lithium
+    ("DB01356", "alzheimer"): 0.5,
+    ("DB00313", "parkinson"): 0.4,  # Valproic acid
+    ("DB01394", "parkinson"): 0.4,  # Colchicine
+    ("DB06742", "parkinson"): 0.7,  # Ambroxol
+    ("DB00201", "parkinson"): 0.6,  # Caffeine
+    ("DB00549", "parkinson"): 0.6,  # UDCA
+    ("DB01276", "parkinson"): 0.6,  # Exenatide
+    ("DB01132", "parkinson"): 0.5,  # Pioglitazone
+    ("DB08826", "parkinson"): 0.5,  # Deferiprone
 }
 
-WEIGHTS = {"gene_target": 0.35, "pathway_overlap": 0.35, "graph_centrality": 0.15, "literature": 0.15}
+WEIGHTS = {"gene_target": 0.40, "pathway_overlap": 0.35, "graph_centrality": 0.10, "literature": 0.15}
 
 
 class RepurposingScorer:
@@ -39,16 +48,31 @@ class RepurposingScorer:
             drug_pathways = set(drug.get("pathways", []))
 
             shared_genes = disease_genes & drug_genes
-            gene_target_score = min(len(shared_genes) / max(len(disease_genes), 1) * 3.0, 1.0)
+            shared_pathways = disease_pathways & drug_pathways
 
+            # Enhanced gene scoring
+            if len(disease_genes) > 0:
+                gene_target_score = len(shared_genes) / len(disease_genes)
+                # Boost score for multiple gene hits
+                if len(shared_genes) >= 3:
+                    gene_target_score = min(gene_target_score * 1.5, 1.0)
+                elif len(shared_genes) >= 2:
+                    gene_target_score = min(gene_target_score * 1.2, 1.0)
+            else:
+                gene_target_score = 0.0
+
+            # Enhanced pathway scoring
             union_pathways = disease_pathways | drug_pathways
             if union_pathways:
-                shared_pathways = disease_pathways & drug_pathways
                 pathway_overlap_score = len(shared_pathways) / len(union_pathways)
-                if len(shared_pathways) >= 1: pathway_overlap_score = max(pathway_overlap_score, 0.15)
-                if len(shared_pathways) >= 2: pathway_overlap_score = max(pathway_overlap_score, 0.30)
+                # Boost for critical pathway matches
+                if len(shared_pathways) >= 3:
+                    pathway_overlap_score = min(pathway_overlap_score * 1.4, 1.0)
+                elif len(shared_pathways) >= 2:
+                    pathway_overlap_score = min(pathway_overlap_score * 1.2, 1.0)
+                elif len(shared_pathways) >= 1:
+                    pathway_overlap_score = max(pathway_overlap_score, 0.15)
             else:
-                shared_pathways = set()
                 pathway_overlap_score = 0.0
 
             graph_centrality_score = self._compute_graph_score(graph, disease_data["name"], drug_id)
@@ -61,6 +85,7 @@ class RepurposingScorer:
                 WEIGHTS["literature"] * literature_score
             )
 
+            # Only include if there's some overlap or high literature score
             if composite_score < min_score and not shared_genes and not shared_pathways:
                 continue
 
@@ -78,7 +103,8 @@ class RepurposingScorer:
                 shared_pathways=sorted(shared_pathways),
                 mechanism=drug["mechanism"],
                 explanation="",
-                confidence=confidence
+                confidence=confidence,
+                smiles=drug.get("smiles", "")
             ))
 
         candidates.sort(key=lambda x: x.composite_score, reverse=True)
@@ -91,7 +117,8 @@ class RepurposingScorer:
             if not UG.has_node(disease_name) or not UG.has_node(drug_id):
                 return 0.0
             length = nx.shortest_path_length(UG, disease_name, drug_id)
-            return round(max(0.0, 1.0 - (length - 2) * 0.25), 4)
+            # Improved scoring: closer connections = higher score
+            return round(max(0.0, 1.0 - (length - 1) * 0.2), 4)
         except:
             return 0.0
 

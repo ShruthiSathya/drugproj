@@ -1,19 +1,19 @@
 """
-LLMExplainer: uses OpenAI API to generate explanations for drug repurposing candidates.
-Free tier: $5 credit for new accounts
+LLMExplainer: uses Anthropic Claude API to generate explanations for drug repurposing candidates.
 """
 
 import asyncio
 from typing import Optional
-import openai
+import aiohttp
 from models import DrugCandidate
 
 
 class LLMExplainer:
-    """Generate AI-powered explanations for repurposing candidates."""
+    """Generate AI-powered explanations for repurposing candidates using Anthropic Claude."""
 
     def __init__(self):
-        self.model = "gpt-3.5-turbo"  # Cheapest model, good quality
+        self.model = "claude-sonnet-4-20250514"
+        self.api_url = "https://api.anthropic.com/v1/messages"
 
     async def explain_candidates(
         self,
@@ -22,7 +22,7 @@ class LLMExplainer:
         api_key: Optional[str] = None
     ) -> list[DrugCandidate]:
         """
-        Generate explanations for each candidate using OpenAI API.
+        Generate explanations for each candidate using Anthropic Claude API.
         If no API key provided, uses fallback heuristic explanations.
         """
         if not api_key:
@@ -30,21 +30,28 @@ class LLMExplainer:
             return self._generate_fallback_explanations(disease_name, candidates)
         
         try:
-            # Set API key
-            openai.api_key = api_key
-            
             # Process in batches to avoid rate limits
-            batch_size = 5
+            batch_size = 3
             explained_candidates = []
             
             for i in range(0, len(candidates), batch_size):
                 batch = candidates[i:i + batch_size]
                 tasks = [
-                    self._explain_single_candidate(disease_name, candidate)
+                    self._explain_single_candidate(disease_name, candidate, api_key)
                     for candidate in batch
                 ]
-                batch_results = await asyncio.gather(*tasks)
-                explained_candidates.extend(batch_results)
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Handle any exceptions in the batch
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        print(f"Error in batch explanation: {result}")
+                    else:
+                        explained_candidates.append(result)
+                
+                # Small delay between batches
+                if i + batch_size < len(candidates):
+                    await asyncio.sleep(0.5)
             
             return explained_candidates
             
@@ -55,33 +62,47 @@ class LLMExplainer:
     async def _explain_single_candidate(
         self,
         disease_name: str,
-        candidate: DrugCandidate
+        candidate: DrugCandidate,
+        api_key: str
     ) -> DrugCandidate:
-        """Generate explanation for a single candidate."""
+        """Generate explanation for a single candidate using Anthropic Claude."""
         
-        prompt = f"""You are a drug repurposing expert. Generate a concise scientific explanation (2-3 sentences) for why {candidate.drug_name} might be repurposed for {disease_name}.
+        prompt = f"""You are a drug repurposing expert. Generate a concise, scientifically accurate explanation (2-3 sentences) for why {candidate.drug_name} might be repurposed for {disease_name}.
 
 Current indication: {candidate.original_indication}
 Mechanism: {candidate.mechanism}
-Shared genes: {', '.join(candidate.shared_genes) if candidate.shared_genes else 'None'}
-Shared pathways: {', '.join(candidate.shared_pathways) if candidate.shared_pathways else 'None'}
+Shared genes: {', '.join(candidate.shared_genes[:5]) if candidate.shared_genes else 'None'}
+Shared pathways: {', '.join(candidate.shared_pathways[:3]) if candidate.shared_pathways else 'None'}
 Confidence: {candidate.confidence}
 
-Focus on the biological rationale based on shared molecular targets and pathways. Be specific and scientific."""
+Focus on the biological rationale based on shared molecular targets and pathways. Be specific and scientific but accessible."""
 
         try:
-            response = await openai.ChatCompletion.acreate(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a drug repurposing expert."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=200,
-                temperature=0.7
-            )
-            
-            explanation = response.choices[0].message.content.strip()
-            candidate.explanation = explanation
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.api_url,
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": 300,
+                        "messages": [
+                            {"role": "user", "content": prompt}
+                        ]
+                    },
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        explanation = data['content'][0]['text'].strip()
+                        candidate.explanation = explanation
+                    else:
+                        error_text = await response.text()
+                        print(f"Anthropic API error ({response.status}): {error_text}")
+                        candidate.explanation = self._generate_fallback_explanation(disease_name, candidate)
             
         except Exception as e:
             print(f"Failed to explain {candidate.drug_name}: {e}")
@@ -108,19 +129,28 @@ Focus on the biological rationale based on shared molecular targets and pathways
             genes_str = ", ".join(candidate.shared_genes[:3])
             if len(candidate.shared_genes) > 3:
                 genes_str += f" and {len(candidate.shared_genes) - 3} others"
-            parts.append(f"{candidate.drug_name} targets {genes_str}, which are implicated in {disease_name}")
+            parts.append(f"{candidate.drug_name} targets key genes ({genes_str}) that are implicated in {disease_name}")
         
         if candidate.shared_pathways:
             pathways_str = ", ".join(candidate.shared_pathways[:2])
             if len(candidate.shared_pathways) > 2:
                 pathways_str += f" and {len(candidate.shared_pathways) - 2} other pathways"
-            parts.append(f"modulates {pathways_str}")
+            parts.append(f"modulates critical pathways including {pathways_str}")
         
         if candidate.mechanism:
-            parts.append(f"Its mechanism as a {candidate.mechanism.lower()} may address underlying pathological processes")
+            parts.append(f"Its mechanism as a {candidate.mechanism.lower()} may address underlying disease mechanisms")
         
         if not parts:
-            return f"{candidate.drug_name} shows potential based on computational analysis of molecular signatures associated with {disease_name}."
+            return f"{candidate.drug_name} shows therapeutic potential for {disease_name} based on computational analysis of shared molecular signatures and biological pathways."
         
         explanation = ". ".join(parts) + "."
+        
+        # Add confidence-based qualifier
+        if candidate.confidence == "High":
+            explanation = "Strong evidence suggests: " + explanation
+        elif candidate.confidence == "Medium":
+            explanation = "Moderate evidence indicates: " + explanation
+        else:
+            explanation = "Preliminary analysis suggests: " + explanation
+        
         return explanation

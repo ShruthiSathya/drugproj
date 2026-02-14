@@ -48,7 +48,8 @@ class KnowledgeGraphBuilder:
                 node_type="drug",
                 name=drug_name,
                 indication=drug_info["indication"],
-                mechanism=drug_info["mechanism"]
+                mechanism=drug_info["mechanism"],
+                smiles=drug_info.get("smiles", "")
             )
             
             # Connect drugs to their target genes
