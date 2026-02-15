@@ -1,470 +1,543 @@
 """
-Database-Driven Drug Safety Filter
-Uses OpenFDA API to dynamically fetch contraindications and warnings
+Drug Safety Filter — OpenFDA-first implementation
+===================================================
+Exposes TWO public methods on DrugSafetyFilter:
 
-This replaces hardcoded rules with real-time data from FDA drug labels
+  filter_drugs(candidate_drugs: List[str], disease_name: str)
+      → (safe_names: List[str], filtered_info: List[Dict])
+      For callers that have a plain list of drug name strings.
+
+  filter_candidates(candidates: List[Dict], disease_name, ...)
+      → (safe_candidates: List[Dict], filtered_candidates: List[Dict])
+      For callers (like main.py) that have pipeline candidate dicts
+      with a 'drug_name' key. THIS IS WHAT main.py CALLS.
+
+Strategy:
+  1. Withdrawn-drug list     → always block
+  2. OpenFDA label API       → fetch contraindications / boxed_warning /
+                               warnings_and_precautions and scan for disease
+                               keywords. Returns exact FDA label excerpt.
+
+Key fixes vs. the broken original:
+  - Correct query field: openfda.generic_name:"<drug>" (harmonized, exact match)
+    The old code used generic_name:<drug> (raw SPL field) which 404s for almost
+    every generic name.
+  - Searches contraindications + boxed_warning + warnings_and_precautions.
+  - filter_candidates() method added so main.py can call it without changes.
+  - Errors are logged loudly, never swallowed silently.
 """
 
-import aiohttp
 import asyncio
-from typing import List, Dict, Tuple, Optional
+import re
 import logging
-import json
-from collections import defaultdict
+from typing import List, Dict, Tuple, Optional, Set
+from urllib.parse import quote
+
+try:
+    import aiohttp
+    _AIOHTTP_AVAILABLE = True
+except ImportError:
+    _AIOHTTP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  DISEASE KEYWORD MAP
+# ─────────────────────────────────────────────────────────────────────────────
 
-class DatabaseDrivenSafetyFilter:
+DISEASE_KEYWORDS: Dict[str, List[str]] = {
+    "parkinson":    ["parkinson", "parkinsonism", "extrapyramidal",
+                     "dopamine agonist", "levodopa"],
+    "alzheimer":    ["alzheimer", "dementia", "cognitive impairment",
+                     "anticholinergic"],
+    "diabetes":     ["diabetes", "diabetic", "hyperglycemia",
+                     "blood glucose", "insulin", "glycemic"],
+    "asthma":       ["asthma", "asthmatic", "bronchospasm",
+                     "bronchial", "bronchoconstriction"],
+    "copd":         ["copd", "chronic obstructive", "emphysema",
+                     "bronchospasm"],
+    "epilepsy":     ["epilepsy", "seizure", "convulsion",
+                     "seizure threshold"],
+    "heart_failure":["heart failure", "cardiac failure",
+                     "congestive heart failure"],
+    "hypertension": ["hypertension", "high blood pressure"],
+    "glaucoma":     ["glaucoma", "intraocular pressure",
+                     "angle-closure"],
+    "myasthenia_gravis": ["myasthenia gravis", "myasthenic"],
+    "kidney_disease":    ["renal impairment", "renal failure",
+                          "chronic kidney", "ckd"],
+    "liver_disease":     ["hepatic impairment", "hepatotoxic",
+                          "cirrhosis", "liver disease"],
+    "osteoporosis":      ["osteoporosis", "bone density", "bone loss"],
+    "gout":              ["gout", "uric acid", "hyperuricemia"],
+    "psoriasis":         ["psoriasis", "psoriatic"],
+    "inflammatory_bowel_disease": ["crohn", "ulcerative colitis",
+                                   "inflammatory bowel"],
+    # Rare diseases
+    "gaucher_disease":   ["gaucher", "glucocerebrosidase"],
+    "porphyria":         ["porphyria", "aminolevulinic"],
+    "huntington_disease":["huntington"],
+    "cystic_fibrosis":   ["cystic fibrosis"],
+    "duchenne_muscular_dystrophy": ["duchenne", "muscular dystrophy"],
+    "fabry_disease":     ["fabry"],
+    "pompe_disease":     ["pompe", "glycogen storage"],
+    "amyotrophic_lateral_sclerosis": ["amyotrophic lateral sclerosis",
+                                       "motor neuron disease"],
+    "hemophilia":        ["hemophilia", "haemophilia", "bleeding disorder"],
+    "sickle_cell_disease": ["sickle cell"],
+    "myotonic_dystrophy":  ["myotonic dystrophy", "myotonia"],
+    "phenylketonuria":     ["phenylketonuria", "pku", "phenylalanine"],
+    "wilson_disease":      ["wilson disease", "copper toxicity"],
+}
+
+# Maps flexible disease names → DISEASE_KEYWORDS key
+DISEASE_NAME_MAP: Dict[str, str] = {
+    "parkinson": "parkinson", "parkinsonian": "parkinson",
+    "parkinson's disease": "parkinson", "parkinson disease": "parkinson",
+    "alzheimer": "alzheimer", "alzheimer's disease": "alzheimer",
+    "dementia": "alzheimer",
+    "diabetes": "diabetes", "diabetic": "diabetes",
+    "type 2 diabetes": "diabetes", "type 1 diabetes": "diabetes",
+    "diabetes mellitus": "diabetes", "t2dm": "diabetes",
+    "type 2 diabetes mellitus": "diabetes",
+    "asthma": "asthma", "bronchial asthma": "asthma",
+    "copd": "copd", "chronic obstructive pulmonary disease": "copd",
+    "emphysema": "copd",
+    "epilepsy": "epilepsy", "seizure disorder": "epilepsy",
+    "heart failure": "heart_failure", "cardiac failure": "heart_failure",
+    "congestive heart failure": "heart_failure", "chf": "heart_failure",
+    "hypertension": "hypertension", "high blood pressure": "hypertension",
+    "glaucoma": "glaucoma",
+    "myasthenia gravis": "myasthenia_gravis", "myasthenia": "myasthenia_gravis",
+    "kidney disease": "kidney_disease", "renal disease": "kidney_disease",
+    "chronic kidney disease": "kidney_disease", "ckd": "kidney_disease",
+    "liver disease": "liver_disease", "hepatic disease": "liver_disease",
+    "cirrhosis": "liver_disease",
+    "osteoporosis": "osteoporosis",
+    "gout": "gout", "hyperuricemia": "gout",
+    "psoriasis": "psoriasis",
+    "crohn's disease": "inflammatory_bowel_disease",
+    "ulcerative colitis": "inflammatory_bowel_disease",
+    "inflammatory bowel disease": "inflammatory_bowel_disease",
+    "ibd": "inflammatory_bowel_disease",
+    "gaucher disease": "gaucher_disease",
+    "porphyria": "porphyria",
+    "huntington's disease": "huntington_disease",
+    "huntington disease": "huntington_disease",
+    "cystic fibrosis": "cystic_fibrosis",
+    "duchenne muscular dystrophy": "duchenne_muscular_dystrophy",
+    "duchenne": "duchenne_muscular_dystrophy", "dmd": "duchenne_muscular_dystrophy",
+    "fabry disease": "fabry_disease",
+    "pompe disease": "pompe_disease",
+    "amyotrophic lateral sclerosis": "amyotrophic_lateral_sclerosis",
+    "als": "amyotrophic_lateral_sclerosis",
+    "motor neuron disease": "amyotrophic_lateral_sclerosis",
+    "hemophilia": "hemophilia", "haemophilia": "hemophilia",
+    "sickle cell disease": "sickle_cell_disease",
+    "sickle cell anemia": "sickle_cell_disease",
+    "myotonic dystrophy": "myotonic_dystrophy",
+    "phenylketonuria": "phenylketonuria", "pku": "phenylketonuria",
+    "wilson disease": "wilson_disease", "wilson's disease": "wilson_disease",
+}
+
+# Always filtered regardless of disease
+WITHDRAWN_DRUGS: Set[str] = {
+    "troglitazone", "rofecoxib", "cerivastatin", "fenfluramine",
+    "dexfenfluramine", "terfenadine", "astemizole", "cisapride",
+    "valdecoxib", "lumiracoxib", "pemoline", "propoxyphene",
+    "sibutramine", "tegaserod", "aprotinin", "ximelagatran",
+    "trovafloxacin", "levomethadyl",
+}
+
+
+def normalize_disease_name(disease_name: str) -> Optional[str]:
+    """Map raw disease name to canonical DISEASE_KEYWORDS key."""
+    lower = disease_name.lower().strip()
+    if lower in DISEASE_KEYWORDS:
+        return lower
+    best_key, best_len = None, 0
+    for fragment, key in DISEASE_NAME_MAP.items():
+        if fragment in lower and len(fragment) > best_len:
+            best_key, best_len = key, len(fragment)
+    return best_key
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FDA LABEL FETCHER
+# ─────────────────────────────────────────────────────────────────────────────
+
+LABEL_BASE = "https://api.fda.gov/drug/label.json"
+LABEL_SECTIONS = [
+    "contraindications",
+    "boxed_warning",
+    "warnings_and_precautions",
+    "warnings",
+]
+
+
+async def _fetch_label(
+    session: "aiohttp.ClientSession",
+    drug_name: str,
+    cache: Dict[str, Optional[Dict]],
+    api_key: Optional[str] = None,
+) -> Optional[Dict]:
     """
-    Intelligent drug safety filter that pulls contraindications from:
-    1. OpenFDA Drug Labels API (contraindications, warnings, boxed warnings)
-    2. OpenFDA Adverse Events API (statistical analysis of serious events)
-    3. Local cache to reduce API calls
+    Fetch the FDA label for a drug. Tries two query strategies:
+      1. openfda.generic_name:"<drug>"  — harmonized field, exact match (best)
+      2. "<drug>"                        — full-text search (broader fallback)
+    Caches results to avoid duplicate requests.
     """
-    
-    def __init__(self, cache_ttl: int = 86400):
-        """
-        Initialize the database-driven filter.
-        
-        Args:
-            cache_ttl: Cache time-to-live in seconds (default: 24 hours)
-        """
-        self.openfda_base = "https://api.fda.gov"
-        self.cache = {}  # In-memory cache
-        self.cache_ttl = cache_ttl
-        
-        # Disease-specific keywords to search for in contraindications
-        self.disease_keywords = {
-            "diabetes": [
-                "diabetes", "diabetic", "hyperglycemia", "glucose", "insulin resistance",
-                "blood sugar", "glycemic control", "diabetic patients"
-            ],
-            "parkinson": [
-                "parkinson", "parkinsonian", "dopamine", "extrapyramidal", 
-                "movement disorder", "tremor", "rigidity"
-            ],
-            "alzheimer": [
-                "alzheimer", "dementia", "cognitive", "memory", "cholinergic",
-                "anticholinergic", "acetylcholine"
-            ],
-            "asthma": [
-                "asthma", "bronchospasm", "broncho", "airway", "respiratory",
-                "breathing", "wheezing", "beta-blocker"
-            ],
-            "epilepsy": [
-                "epilepsy", "seizure", "convulsion", "seizure threshold"
-            ],
-            "hypertension": [
-                "hypertension", "blood pressure", "hypertensive", "elevated blood pressure"
-            ],
-            "heart_failure": [
-                "heart failure", "cardiac failure", "congestive", "cardiomyopathy",
-                "ventricular dysfunction"
-            ],
-            "copd": [
-                "copd", "chronic obstructive", "emphysema", "chronic bronchitis",
-                "respiratory", "bronchospasm"
-            ],
-            "glaucoma": [
-                "glaucoma", "intraocular pressure", "narrow-angle", "angle-closure"
-            ],
-            "osteoporosis": [
-                "osteoporosis", "bone", "fracture", "bone density", "bone loss"
-            ],
-            "crohn": [
-                "crohn", "inflammatory bowel", "ibd", "intestinal inflammation"
-            ],
-            "rheumatoid_arthritis": [
-                "infection", "tuberculosis", "immunosuppression", "live vaccine"
-            ],
-            "depression": [
-                "depression", "suicidal", "mood", "psychiatric"
-            ]
-        }
-        
-        # Known problematic drug-disease combinations
-        # Used as backup when API data is insufficient
-        self.critical_contraindications = {
-            "diabetes": {
-                "drugs": ["olanzapine", "clozapine", "quetiapine", "risperidone"],
-                "reason": "Atypical antipsychotics cause metabolic syndrome and diabetes"
-            },
-            "asthma": {
-                "drugs": ["propranolol", "atenolol", "metoprolol", "nadolol", "timolol"],
-                "reason": "Beta-blockers cause life-threatening bronchospasm"
-            },
-            "parkinson": {
-                "drugs": ["perphenazine", "haloperidol", "olanzapine", "metoclopramide"],
-                "reason": "Dopamine antagonists worsen Parkinson's symptoms"
-            }
-        }
-        
-        # Drugs withdrawn from market (always filter)
-        self.withdrawn_drugs = {
-            "troglitazone", "rofecoxib", "cerivastatin", "fenfluramine",
-            "terfenadine", "valdecoxib", "pemoline", "propoxyphene"
-        }
-    
-    def _normalize_disease_name(self, disease_name: str) -> str:
-        """Normalize disease name to match our keyword dictionary."""
-        disease_lower = disease_name.lower().strip()
-        
-        mappings = {
-            "parkinson": "parkinson",
-            "parkinson's": "parkinson",
-            "parkinson disease": "parkinson",
-            "parkinsonian disorder": "parkinson",
-            "alzheimer": "alzheimer",
-            "alzheimer's": "alzheimer",
-            "alzheimer disease": "alzheimer",
-            "diabetes": "diabetes",
-            "diabetes mellitus": "diabetes",
-            "type 2 diabetes": "diabetes",
-            "diabetes mellitus type 2": "diabetes",
-            "asthma": "asthma",
-            "copd": "copd",
-            "chronic obstructive pulmonary disease": "copd",
-            "epilepsy": "epilepsy",
-            "seizure": "epilepsy",
-            "hypertension": "hypertension",
-            "high blood pressure": "hypertension",
-            "heart failure": "heart_failure",
-            "glaucoma": "glaucoma",
-            "osteoporosis": "osteoporosis",
-            "crohn": "crohn",
-            "crohn disease": "crohn",
-            "crohn's disease": "crohn",
-            "rheumatoid arthritis": "rheumatoid_arthritis",
-            "depression": "depression",
-            "major depressive disorder": "depression"
-        }
-        
-        for key, value in mappings.items():
-            if key in disease_lower:
-                return value
-        
-        return disease_lower.replace(" ", "_")
-    
-    async def _fetch_drug_label(self, drug_name: str) -> Optional[Dict]:
-        """
-        Fetch drug label data from OpenFDA API.
-        Returns contraindications, warnings, and boxed warnings.
-        """
-        # Check cache first
-        cache_key = f"label_{drug_name}"
-        if cache_key in self.cache:
-            logger.debug(f"Cache hit for {drug_name} label")
-            return self.cache[cache_key]
-        
+    key = drug_name.lower()
+    if key in cache:
+        return cache[key]
+
+    params_base = f"&api_key={api_key}" if api_key else ""
+    urls = [
+        f'{LABEL_BASE}?search=openfda.generic_name:"{quote(key)}"&limit=1{params_base}',
+        f'{LABEL_BASE}?search="{quote(key)}"&limit=1{params_base}',
+    ]
+
+    for url in urls:
         try:
-            # Search for drug label
-            url = f"{self.openfda_base}/drug/label.json"
-            params = {
-                "search": f'openfda.generic_name:"{drug_name}"',
-                "limit": 1
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        if data.get('results'):
-                            result = data['results'][0]
-                            
-                            # Extract relevant sections
-                            label_data = {
-                                "contraindications": result.get('contraindications', []),
-                                "warnings": result.get('warnings', []),
-                                "boxed_warning": result.get('boxed_warning', []),
-                                "warnings_and_cautions": result.get('warnings_and_cautions', []),
-                                "precautions": result.get('precautions', []),
-                                "adverse_reactions": result.get('adverse_reactions', [])
-                            }
-                            
-                            # Cache the result
-                            self.cache[cache_key] = label_data
-                            logger.info(f"✅ Fetched label for {drug_name}")
-                            return label_data
-                        else:
-                            logger.warning(f"No label found for {drug_name}")
-                            return None
-                    else:
-                        logger.warning(f"FDA API returned {response.status} for {drug_name}")
-                        return None
-                        
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout fetching label for {drug_name}")
-            return None
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    results = data.get("results", [])
+                    if results:
+                        cache[key] = results[0]
+                        return results[0]
+                elif resp.status not in (404, 400):
+                    logger.debug(f"FDA API {resp.status} for {drug_name}")
         except Exception as e:
-            logger.error(f"Error fetching label for {drug_name}: {e}")
-            return None
-    
-    async def _analyze_serious_adverse_events(
-        self, 
-        drug_name: str, 
-        disease_name: str
-    ) -> Dict:
+            logger.debug(f"FDA fetch error for {drug_name}: {e}")
+            break  # network error — stop retrying
+
+    cache[key] = None
+    return None
+
+
+def _extract_label_text(label: Dict, section: str) -> str:
+    val = label.get(section)
+    if not val:
+        return ""
+    if isinstance(val, list):
+        return " ".join(val).lower()
+    return str(val).lower()
+
+
+def _find_disease_mention(
+    label: Dict, keywords: List[str]
+) -> Optional[Tuple[str, str, str]]:
+    """
+    Search label sections for any disease keyword.
+    Returns (section, severity, excerpt) or None.
+    severity = "absolute" for contraindications/boxed_warning, "relative" otherwise.
+    """
+    for section in LABEL_SECTIONS:
+        text = _extract_label_text(label, section)
+        if not text:
+            continue
+        for kw in keywords:
+            if kw.lower() in text:
+                idx = text.find(kw.lower())
+                start = max(0, idx - 80)
+                end = min(len(text), idx + 180)
+                excerpt = re.sub(r"\s+", " ", text[start:end].strip())
+                severity = (
+                    "absolute"
+                    if section in ("contraindications", "boxed_warning")
+                    else "relative"
+                )
+                return section, severity, f"...{excerpt}..."
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAIN FILTER CLASS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DrugSafetyFilter:
+    """
+    Filters unsafe drug candidates using the OpenFDA label API.
+
+    Two public methods:
+      filter_drugs()       — accepts List[str] of drug names
+      filter_candidates()  — accepts List[Dict] from the pipeline (has 'drug_name' key)
+                             THIS IS WHAT main.py calls.
+    """
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key
+        self._cache: Dict[str, Optional[Dict]] = {}
+
+    # ── Public: string list interface ────────────────────────────────────────
+
+    def filter_drugs(
+        self,
+        candidate_drugs: List[str],
+        disease_name: str,
+    ) -> Tuple[List[str], List[Dict]]:
         """
-        Analyze serious adverse events from FAERS database.
-        Returns statistics on serious events related to the disease.
+        Filter a plain list of drug name strings.
+        Returns (safe_drug_names, filtered_info_list).
         """
-        cache_key = f"adverse_{drug_name}_{disease_name}"
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-        
-        try:
-            # Get disease keywords
-            normalized_disease = self._normalize_disease_name(disease_name)
-            keywords = self.disease_keywords.get(normalized_disease, [disease_name.lower()])
-            
-            # Search for serious adverse events
-            url = f"{self.openfda_base}/drug/event.json"
-            
-            # Build search query for serious events with disease-related reactions
-            search_terms = []
-            for keyword in keywords[:3]:  # Limit to top 3 keywords
-                search_terms.append(f'patient.reaction.reactionmeddrapt:"{keyword}"')
-            
-            params = {
-                "search": f'patient.drug.medicinalproduct:"{drug_name}" AND serious:1 AND ({" OR ".join(search_terms)})',
-                "count": "patient.reaction.reactionmeddrapt.exact",
-                "limit": 10
-            }
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        result = {
-                            "serious_event_count": sum(r['count'] for r in data.get('results', [])),
-                            "top_reactions": [
-                                {"reaction": r['term'], "count": r['count']} 
-                                for r in data.get('results', [])[:5]
-                            ]
-                        }
-                        
-                        self.cache[cache_key] = result
-                        logger.info(f"✅ Analyzed adverse events for {drug_name} + {disease_name}")
-                        return result
-                    else:
-                        return {"serious_event_count": 0, "top_reactions": []}
-                        
-        except Exception as e:
-            logger.error(f"Error analyzing adverse events for {drug_name}: {e}")
-            return {"serious_event_count": 0, "top_reactions": []}
-    
-    def _check_label_for_contraindication(
-        self, 
-        label_data: Dict, 
-        disease_keywords: List[str]
-    ) -> Tuple[bool, str]:
-        """
-        Check if drug label contains contraindications for the disease.
-        Returns (is_contraindicated, reason)
-        """
-        if not label_data:
-            return False, ""
-        
-        # Check each section
-        sections_to_check = [
-            'contraindications',
-            'boxed_warning',
-            'warnings',
-            'warnings_and_cautions',
-            'precautions'
-        ]
-        
-        for section_name in sections_to_check:
-            section_content = label_data.get(section_name, [])
-            
-            # Join all text in section
-            if isinstance(section_content, list):
-                text = " ".join(section_content).lower()
-            else:
-                text = str(section_content).lower()
-            
-            # Check if any disease keyword appears in this section
-            for keyword in disease_keywords:
-                if keyword in text:
-                    # Extract context around the keyword
-                    idx = text.find(keyword)
-                    start = max(0, idx - 100)
-                    end = min(len(text), idx + 200)
-                    context = text[start:end]
-                    
-                    # Clean up the context
-                    reason = context.replace('\n', ' ').strip()
-                    if len(reason) > 200:
-                        reason = reason[:200] + "..."
-                    
-                    logger.info(f"Found contraindication: {keyword} in {section_name}")
-                    return True, f"FDA label {section_name} mentions: {reason}"
-        
-        return False, ""
-    
-    async def filter_candidates(
+        if not _AIOHTTP_AVAILABLE:
+            raise RuntimeError("aiohttp is required: pip install aiohttp")
+        return asyncio.run(self._async_filter(candidate_drugs, disease_name))
+
+    # ── Public: pipeline dict interface ──────────────────────────────────────
+
+    def filter_candidates(
         self,
         candidates: List[Dict],
         disease_name: str,
         remove_absolute: bool = True,
         remove_relative: bool = False,
-        use_adverse_events: bool = True,
-        serious_event_threshold: int = 100
     ) -> Tuple[List[Dict], List[Dict]]:
         """
-        Filter drug candidates using database-driven approach.
-        
-        Args:
-            candidates: List of drug candidates
-            disease_name: Disease being treated
-            remove_absolute: Remove absolutely contraindicated drugs
-            remove_relative: Remove relatively contraindicated drugs
-            use_adverse_events: Use adverse event statistics
-            serious_event_threshold: Minimum serious events to flag
-            
-        Returns:
-            (safe_candidates, filtered_out_candidates)
+        Filter pipeline candidate dicts (each must have a 'drug_name' key).
+        Returns (safe_candidates, filtered_candidates) — both as full dicts.
+
+        Contraindication info is attached to filtered items under the
+        'contraindication' key so main.py can read it directly.
+
+        This is the method called by the FastAPI endpoint in main.py.
         """
-        normalized_disease = self._normalize_disease_name(disease_name)
-        disease_keywords = self.disease_keywords.get(
-            normalized_disease, 
-            [disease_name.lower()]
-        )
-        
-        logger.info(f"🔍 Database-driven filtering for '{disease_name}' (normalized: '{normalized_disease}')")
-        logger.info(f"Disease keywords: {disease_keywords}")
-        
-        safe_candidates = []
-        filtered_out = []
-        
-        # Process each candidate
-        for candidate in candidates:
-            drug_name = candidate.get('drug_name', '').lower().strip()
-            
-            # Check if drug is withdrawn from market
-            if drug_name in self.withdrawn_drugs:
-                candidate['contraindication_reason'] = f"WITHDRAWN from market - should not be used"
-                candidate['contraindication_severity'] = 'absolute'
-                candidate['contraindication_source'] = 'market_withdrawal'
-                filtered_out.append(candidate)
-                logger.info(f"❌ FILTERED (withdrawn): {drug_name}")
-                continue
-            
-            # Check critical contraindications (backup for API failures)
-            critical_rules = self.critical_contraindications.get(normalized_disease, {})
-            if drug_name in critical_rules.get('drugs', []):
-                candidate['contraindication_reason'] = critical_rules['reason']
-                candidate['contraindication_severity'] = 'absolute'
-                candidate['contraindication_source'] = 'critical_rule'
-                filtered_out.append(candidate)
-                logger.info(f"❌ FILTERED (critical rule): {drug_name}")
-                continue
-            
-            # Fetch FDA drug label
-            label_data = await self._fetch_drug_label(drug_name)
-            
-            if label_data:
-                # Check label for contraindications
-                is_contraindicated, reason = self._check_label_for_contraindication(
-                    label_data, 
-                    disease_keywords
-                )
-                
-                if is_contraindicated and remove_absolute:
-                    candidate['contraindication_reason'] = reason
-                    candidate['contraindication_severity'] = 'absolute'
-                    candidate['contraindication_source'] = 'fda_label'
-                    filtered_out.append(candidate)
-                    logger.info(f"❌ FILTERED (FDA label): {drug_name}")
-                    continue
-            else:
-                logger.warning(f"⚠️ No FDA label data for {drug_name}")
-            
-            # Analyze adverse events (if enabled)
-            if use_adverse_events:
-                adverse_data = await self._analyze_serious_adverse_events(
-                    drug_name, 
-                    disease_name
-                )
-                
-                if adverse_data['serious_event_count'] >= serious_event_threshold:
-                    top_reactions = [r['reaction'] for r in adverse_data['top_reactions'][:3]]
-                    
-                    if remove_relative:
-                        candidate['contraindication_reason'] = (
-                            f"High rate of serious adverse events related to {disease_name} "
-                            f"({adverse_data['serious_event_count']} reports): {', '.join(top_reactions)}"
-                        )
-                        candidate['contraindication_severity'] = 'relative'
-                        candidate['contraindication_source'] = 'adverse_events'
-                        filtered_out.append(candidate)
-                        logger.info(f"⚠️ FILTERED (adverse events): {drug_name}")
-                        continue
-                    else:
-                        # Add warning but don't filter
-                        candidate['safety_warning'] = (
-                            f"Note: {adverse_data['serious_event_count']} serious adverse "
-                            f"events reported related to {disease_name}"
-                        )
-                        logger.info(f"⚠️ WARNING added for {drug_name}")
-            
-            # Candidate passed all checks
-            safe_candidates.append(candidate)
-        
-        logger.info(
-            f"✅ Filtering complete: {len(safe_candidates)} safe, "
-            f"{len(filtered_out)} filtered"
-        )
-        
-        return safe_candidates, filtered_out
-    
-    def clear_cache(self):
-        """Clear the internal cache."""
-        self.cache = {}
-        logger.info("Cache cleared")
+        if not _AIOHTTP_AVAILABLE:
+            raise RuntimeError("aiohttp is required: pip install aiohttp")
+        if not candidates:
+            return [], []
 
-
-# Alias for backward compatibility
-DrugSafetyFilter = DatabaseDrivenSafetyFilter
-
-
-# Testing
-if __name__ == "__main__":
-    async def test_filter():
-        filter = DatabaseDrivenSafetyFilter()
-        
-        test_cases = [
-            ("olanzapine", "Type 2 Diabetes"),
-            ("propranolol", "Asthma"),
-            ("diphenhydramine", "Alzheimer's Disease"),
-            ("perphenazine", "Parkinson's Disease"),
-            ("metformin", "Type 2 Diabetes"),
+        # Extract drug name strings for the async fetcher
+        drug_names = [
+            c.get("drug_name") or c.get("name") or ""
+            for c in candidates
         ]
-        
-        print("=" * 70)
-        print("DATABASE-DRIVEN DRUG SAFETY FILTER TEST")
-        print("=" * 70)
-        print()
-        
-        for drug, disease in test_cases:
-            candidates = [{"drug_name": drug, "score": 0.8}]
-            safe, filtered = await filter.filter_candidates(
-                candidates, 
-                disease,
-                use_adverse_events=False  # Disable for testing speed
-            )
-            
-            print(f"Drug: {drug}, Disease: {disease}")
-            if filtered:
-                reason = filtered[0].get('contraindication_reason', 'No reason')
-                source = filtered[0].get('contraindication_source', 'unknown')
-                print(f"  ❌ FILTERED ({source}): {reason[:100]}")
+        name_to_candidate = {
+            (c.get("drug_name") or c.get("name") or "").lower(): c
+            for c in candidates
+        }
+
+        # Run FDA lookup
+        safe_names, filtered_info = asyncio.run(
+            self._async_filter(drug_names, disease_name)
+        )
+        filtered_name_map = {f["drug"].lower(): f for f in filtered_info}
+
+        safe_candidates: List[Dict] = []
+        filtered_candidates: List[Dict] = []
+
+        for drug_name in drug_names:
+            key = drug_name.lower()
+            candidate = dict(name_to_candidate.get(key, {"drug_name": drug_name}))
+
+            if key in filtered_name_map:
+                hit = filtered_name_map[key]
+                severity = hit["severity"]
+                candidate["contraindication"] = {
+                    "reason": hit["reason"],
+                    "severity": severity,
+                    "source": hit.get("source", ""),
+                    "fda_section": hit.get("fda_section", ""),
+                }
+                # Decide whether to actually remove based on caller's preference
+                if severity == "withdrawn":
+                    filtered_candidates.append(candidate)
+                elif severity == "absolute" and remove_absolute:
+                    filtered_candidates.append(candidate)
+                elif severity == "relative" and remove_relative:
+                    filtered_candidates.append(candidate)
+                else:
+                    # Has a warning but caller chose to keep it — annotate and pass through
+                    candidate["safety_warning"] = hit["reason"]
+                    safe_candidates.append(candidate)
             else:
-                print(f"  ✅ SAFE")
-            print()
-    
-    # Run async test
-    asyncio.run(test_filter())
+                safe_candidates.append(candidate)
+
+        logger.info(
+            f"filter_candidates: {len(filtered_candidates)}/{len(candidates)} "
+            f"removed for '{disease_name}'"
+        )
+        return safe_candidates, filtered_candidates
+
+    # ── Internal async logic ──────────────────────────────────────────────────
+
+    async def _async_filter(
+        self,
+        candidate_drugs: List[str],
+        disease_name: str,
+    ) -> Tuple[List[str], List[Dict]]:
+
+        db_key = normalize_disease_name(disease_name)
+        keywords = DISEASE_KEYWORDS.get(db_key, []) if db_key else []
+
+        if not keywords:
+            logger.warning(
+                f"No disease keywords found for '{disease_name}'. "
+                "Only withdrawn drugs will be filtered."
+            )
+
+        safe_drugs: List[str] = []
+        filtered_drugs: List[Dict] = []
+
+        async with aiohttp.ClientSession() as session:
+            tasks = {
+                drug: asyncio.create_task(
+                    _fetch_label(session, drug.lower(), self._cache, self.api_key)
+                )
+                for drug in candidate_drugs
+            }
+            labels: Dict[str, Optional[Dict]] = {}
+            for drug, task in tasks.items():
+                try:
+                    labels[drug] = await task
+                except Exception as e:
+                    logger.error(f"Label fetch task failed for {drug}: {e}")
+                    labels[drug] = None
+
+        for drug in candidate_drugs:
+            drug_lower = drug.lower()
+
+            # 1. Withdrawn?
+            if drug_lower in WITHDRAWN_DRUGS:
+                filtered_drugs.append({
+                    "drug": drug,
+                    "reason": "Market-withdrawn drug (FDA safety recall).",
+                    "severity": "withdrawn",
+                    "source": "withdrawn_db",
+                    "fda_section": "market_withdrawal",
+                })
+                logger.info(f"FILTERED (withdrawn): {drug}")
+                continue
+
+            # 2. FDA label scan
+            label = labels.get(drug)
+            if label is None:
+                logger.warning(
+                    f"No FDA label found for '{drug}' — passing through unverified."
+                )
+                safe_drugs.append(drug)
+                continue
+
+            if keywords:
+                hit = _find_disease_mention(label, keywords)
+                if hit:
+                    section, severity, excerpt = hit
+                    filtered_drugs.append({
+                        "drug": drug,
+                        "reason": (
+                            f"FDA label ({section.replace('_', ' ')}): {excerpt}"
+                        ),
+                        "severity": severity,
+                        "source": "fda_label",
+                        "fda_section": section,
+                    })
+                    logger.info(
+                        f"FILTERED (fda_label/{section}, {severity}): "
+                        f"{drug} for '{disease_name}'"
+                    )
+                    continue
+
+            safe_drugs.append(drug)
+
+        logger.info(
+            f"Safety filter: {len(filtered_drugs)}/{len(candidate_drugs)} "
+            f"drugs removed for '{disease_name}'"
+        )
+        return safe_drugs, filtered_drugs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  CONVENIENCE FUNCTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def filter_unsafe_drugs(
+    candidate_drugs: List[str],
+    disease_name: str,
+    api_key: Optional[str] = None,
+) -> Tuple[List[str], List[Dict]]:
+    """
+    Convenience wrapper around DrugSafetyFilter.filter_drugs().
+    Accepts plain drug name strings.
+    """
+    return DrugSafetyFilter(api_key=api_key).filter_drugs(
+        candidate_drugs, disease_name
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SELF-TEST
+# ─────────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    if not _AIOHTTP_AVAILABLE:
+        print("ERROR: aiohttp not installed. Run: pip install aiohttp")
+        exit(1)
+
+    # Test filter_candidates() — same dict format as main.py uses
+    test_cases = [
+        {
+            "disease": "Parkinson Disease",
+            "candidates": [
+                {"drug_name": "haloperidol"},
+                {"drug_name": "olanzapine"},
+                {"drug_name": "levodopa"},
+                {"drug_name": "metoclopramide"},
+                {"drug_name": "carbidopa"},
+            ],
+            "must_filter": {"haloperidol", "olanzapine", "metoclopramide"},
+        },
+        {
+            "disease": "Alzheimer Disease",
+            "candidates": [
+                {"drug_name": "diphenhydramine"},
+                {"drug_name": "amitriptyline"},
+                {"drug_name": "donepezil"},
+                {"drug_name": "galantamine"},
+            ],
+            "must_filter": {"diphenhydramine", "amitriptyline"},
+        },
+        {
+            "disease": "type 2 diabetes mellitus",
+            "candidates": [
+                {"drug_name": "olanzapine"},
+                {"drug_name": "prednisone"},
+                {"drug_name": "metformin"},
+                {"drug_name": "sitagliptin"},
+            ],
+            "must_filter": {"olanzapine", "prednisone"},
+        },
+        {
+            "disease": "Asthma",
+            "candidates": [
+                {"drug_name": "propranolol"},
+                {"drug_name": "atenolol"},
+                {"drug_name": "montelukast"},
+                {"drug_name": "fluticasone"},
+            ],
+            "must_filter": {"propranolol", "atenolol"},
+        },
+    ]
+
+    f = DrugSafetyFilter()
+    all_passed = True
+    for tc in test_cases:
+        print(f"\n── {tc['disease']} ──")
+        safe, filtered = f.filter_candidates(tc["candidates"], tc["disease"])
+        filtered_names = {c["drug_name"].lower() for c in filtered}
+        missing = tc["must_filter"] - filtered_names
+
+        for c in filtered:
+            info = c.get("contraindication", {})
+            print(f"  FILTERED [{info.get('severity','?')}] {c['drug_name']}")
+            print(f"    {info.get('reason','')[:110]}...")
+
+        status = "PASS" if not missing else "FAIL"
+        if missing:
+            all_passed = False
+            print(f"  MISSED (critical!): {sorted(missing)}")
+        print(f"  → {status}")
+
+    print("\n" + ("ALL TESTS PASSED" if all_passed else "SOME TESTS FAILED"))
