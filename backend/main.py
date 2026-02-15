@@ -3,7 +3,7 @@ FastAPI Backend for Drug Repurposing Platform
 Uses production pipeline with real API integrations
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -97,23 +97,19 @@ async def analyze_disease(request: AnalyzeRequest):
     """
     Analyze a disease and find drug repurposing candidates.
     
-    This endpoint:
-    1. Fetches disease data from OpenTargets
-    2. Fetches approved drugs from ChEMBL
-    3. Enhances with DGIdb interactions
-    4. Scores drug-disease matches
-    5. Returns ranked candidates
-    
-    Note: First query takes 30-60 seconds (fetching + caching drugs).
-          Subsequent queries are <2 seconds (using cache).
+    Returns proper JSON response with error handling for unrecognized diseases.
     """
     global pipeline
     
     if not pipeline:
-        raise HTTPException(
-            status_code=503,
-            detail="Pipeline not initialized. Please try again."
-        )
+        return {
+            "success": False,
+            "error": "Pipeline not initialized. Please try again in a moment.",
+            "suggestion": "The server is starting up. Please wait a few seconds and try again.",
+            "disease": None,
+            "candidates": [],
+            "metadata": {}
+        }
     
     try:
         logger.info(f"📥 Received analysis request for: {request.disease_name}")
@@ -127,25 +123,39 @@ async def analyze_disease(request: AnalyzeRequest):
         )
         
         if not result.get('success'):
-            logger.warning(f"❌ Analysis failed: {result.get('error')}")
-            raise HTTPException(
-                status_code=404,
-                detail=result.get('error', 'Disease not found')
-            )
+            logger.warning(f"❌ Disease not found: {request.disease_name}")
+            # Return user-friendly error message without crashing
+            return {
+                "success": False,
+                "error": f"Disease '{request.disease_name}' not found in our database.",
+                "suggestion": "Please check the spelling or try using the full medical name (e.g., 'Parkinson Disease' instead of 'Parkinsons'). You can also try searching for related conditions.",
+                "disease": None,
+                "candidates": [],
+                "metadata": {
+                    "searched_term": request.disease_name,
+                    "databases_checked": ["OpenTargets", "ChEMBL", "DGIdb"]
+                }
+            }
         
         logger.info(f"✅ Analysis complete: {len(result.get('candidates', []))} candidates found")
         return result
     
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"❌ Error during analysis: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
+        
+        # Return error without crashing the app
+        return {
+            "success": False,
+            "error": "An unexpected error occurred during analysis.",
+            "suggestion": "Please try again or contact support if the issue persists. Make sure you're using a valid disease name.",
+            "disease": None,
+            "candidates": [],
+            "metadata": {
+                "error_details": str(e)
+            }
+        }
 
 
 @app.get("/diseases/search", tags=["Search"])
@@ -163,6 +173,13 @@ async def search_diseases(query: str):
         "Cystic Fibrosis",
         "Alzheimer Disease",
         "ALS (Amyotrophic Lateral Sclerosis)",
+        "Fabry Disease",
+        "Pompe Disease",
+        "Multiple Sclerosis",
+        "Rheumatoid Arthritis",
+        "Type 2 Diabetes",
+        "Breast Cancer",
+        "Lung Cancer",
     ]
     
     # Simple filter by query
@@ -170,7 +187,7 @@ async def search_diseases(query: str):
     
     return {
         "query": query,
-        "suggestions": filtered[:10]
+        "suggestions": filtered[:10] if filtered else suggestions[:10]
     }
 
 

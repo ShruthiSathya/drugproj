@@ -1,22 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 
 function App() {
   const [diseaseName, setDiseaseName] = useState('');
-  const [topK, setTopK] = useState(10);
-  const [minScore, setMinScore] = useState(0.2); // Lowered default
-  const [apiKey, setApiKey] = useState('');
+  const [maxResults, setMaxResults] = useState(10);
+  const [minScore, setMinScore] = useState(0.2);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
-  const [streamingStatus, setStreamingStatus] = useState('');
+  const [loadingMessage, setLoadingMessage] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setResults(null);
-    setStreamingStatus('Starting analysis...');
+    setLoadingMessage('🔍 Searching for disease in database...');
 
     try {
       const response = await fetch('http://localhost:8000/analyze', {
@@ -26,333 +25,399 @@ function App() {
         },
         body: JSON.stringify({
           disease_name: diseaseName,
-          top_k: topK,
           min_score: minScore,
-          anthropic_api_key: apiKey || null,
+          max_results: maxResults,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+
+      if (!data.success) {
+        // Handle error gracefully without crashing
+        setError({
+          message: data.error || 'An error occurred',
+          suggestion: data.suggestion || 'Please try again with a different disease name.'
+        });
+        setLoadingMessage('');
+        setLoading(false);
+        return;
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            
-            if (data.stage === 'fetching') {
-              setStreamingStatus(data.message);
-            } else if (data.stage === 'disease_found') {
-              setStreamingStatus(`Found: ${data.data.name} (${data.data.gene_count} genes, ${data.data.pathway_count} pathways)`);
-            } else if (data.stage === 'graph_building') {
-              setStreamingStatus(data.message);
-            } else if (data.stage === 'graph_built') {
-              setStreamingStatus(`Graph built: ${data.data.total_nodes} nodes, ${data.data.total_edges} edges`);
-            } else if (data.stage === 'scoring') {
-              setStreamingStatus(data.message);
-            } else if (data.stage === 'scored') {
-              setStreamingStatus(data.message);
-            } else if (data.stage === 'explaining') {
-              setStreamingStatus(data.message);
-            } else if (data.stage === 'complete') {
-              setResults(data.data);
-              setStreamingStatus('Analysis complete!');
-            } else if (data.stage === 'error') {
-              setError(data.message);
-              setStreamingStatus('');
-            } else if (data.stage === 'warning') {
-              setStreamingStatus(data.message);
-            }
-          }
-        }
-      }
+      // Success - set results
+      setResults(data);
+      setLoadingMessage('');
+      
     } catch (err) {
-      setError(err.message);
-      setStreamingStatus('');
+      console.error('Error:', err);
+      setError({
+        message: 'Failed to connect to server',
+        suggestion: 'Please make sure the backend server is running on port 8000.'
+      });
+      setLoadingMessage('');
     } finally {
       setLoading(false);
     }
   };
 
   const getScoreColor = (score) => {
-    if (score >= 0.7) return '#10b981';
-    if (score >= 0.5) return '#f59e0b';
-    return '#ef4444';
+    if (score >= 0.7) return '#10b981'; // green
+    if (score >= 0.5) return '#f59e0b'; // yellow
+    return '#ef4444'; // red
   };
 
   const getConfidenceBadge = (confidence) => {
     const colors = {
-      High: 'bg-green-100 text-green-800',
-      Medium: 'bg-yellow-100 text-yellow-800',
-      Low: 'bg-red-100 text-red-800',
+      high: 'bg-green-500 text-white',
+      medium: 'bg-yellow-500 text-white',
+      low: 'bg-red-500 text-white',
     };
-    return colors[confidence] || colors.Low;
+    return colors[confidence?.toLowerCase()] || colors.low;
   };
 
+  // Rotate 3D molecules
+  useEffect(() => {
+    if (results) {
+      const molecules = document.querySelectorAll('.molecule-3d');
+      molecules.forEach((mol, i) => {
+        mol.style.animation = `rotate3d ${3 + i * 0.5}s linear infinite`;
+      });
+    }
+  }, [results]);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="min-h-screen bg-black relative overflow-hidden">
+      {/* Graph paper background */}
+      <div className="fixed inset-0 opacity-20 pointer-events-none">
+        <div className="absolute inset-0" style={{
+          backgroundImage: `
+            linear-gradient(rgba(0, 255, 0, 0.1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 255, 0, 0.1) 1px, transparent 1px)
+          `,
+          backgroundSize: '40px 40px'
+        }}></div>
+      </div>
+
+      {/* Animated grid lines */}
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="grid-line-h"></div>
+        <div className="grid-line-v"></div>
+      </div>
+
+      <div className="container mx-auto px-4 py-8 max-w-7xl relative z-10">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-5xl font-black mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600">
-            🧬 AI Drug Repurposing Engine
+          <h1 className="text-6xl font-black mb-4 text-green-400 glitch-text" data-text="DRUG REPURPOSING ENGINE">
+            🧬 DRUG REPURPOSING ENGINE
           </h1>
-          <p className="text-gray-600 text-xl">
-            Discover FDA-approved drugs for new therapeutic applications
+          <p className="text-green-300 text-xl font-mono">
+            {'>'} AI-POWERED THERAPEUTIC DISCOVERY SYSTEM {'<'}
           </p>
+          <div className="mt-4 flex justify-center gap-4">
+            <div className="status-indicator">
+              <span className="status-dot"></span>
+              <span className="text-green-400 text-sm font-mono">DATABASES: ONLINE</span>
+            </div>
+            <div className="status-indicator">
+              <span className="status-dot"></span>
+              <span className="text-green-400 text-sm font-mono">AI: ACTIVE</span>
+            </div>
+          </div>
         </div>
 
         {/* Input Form */}
-        <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold text-gray-800 mb-2">
-                🔬 Disease Name
-              </label>
-              <input
-                type="text"
-                value={diseaseName}
-                onChange={(e) => setDiseaseName(e.target.value)}
-                placeholder="e.g., Parkinson's Disease, Alzheimer's, Breast Cancer"
-                className="w-full px-6 py-4 border-2 border-purple-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-200/50 transition-all outline-none text-lg"
-                required
-              />
+        <div className="terminal-window mb-8">
+          <div className="terminal-header">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500"></div>
+              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="text-green-400 font-mono text-sm">
+              QUERY_INTERFACE.EXE
+            </div>
+          </div>
+          
+          <div className="terminal-body">
+            <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2">
-                  📊 Number of Candidates
+                <label className="block text-green-400 font-mono mb-2 text-sm">
+                  {'>'} TARGET_DISEASE:
                 </label>
                 <input
-                  type="number"
-                  value={topK}
-                  onChange={(e) => setTopK(Number(e.target.value))}
-                  min="1"
-                  max="20"
-                  className="w-full px-6 py-4 border-2 border-blue-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-200/50 transition-all outline-none"
+                  type="text"
+                  value={diseaseName}
+                  onChange={(e) => setDiseaseName(e.target.value)}
+                  placeholder="Enter disease name (e.g., Parkinson Disease)..."
+                  className="terminal-input"
+                  required
                 />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2">
-                  🎯 Minimum Score
-                </label>
-                <input
-                  type="number"
-                  value={minScore}
-                  onChange={(e) => setMinScore(Number(e.target.value))}
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  className="w-full px-6 py-4 border-2 border-green-200 rounded-xl focus:border-green-500 focus:ring-4 focus:ring-green-200/50 transition-all outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-gray-800 mb-2">
-                🔑 Anthropic API Key (Optional)
-              </label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-ant-..."
-                className="w-full px-6 py-4 border-2 border-pink-200 rounded-xl focus:border-pink-500 focus:ring-4 focus:ring-pink-200/50 transition-all outline-none"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-5 px-8 rounded-xl font-bold text-xl hover:shadow-2xl hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none transition-all duration-300"
-            >
-              {loading ? '⚡ Analyzing...' : '🚀 Find Repurposing Candidates'}
-            </button>
-          </form>
-
-          {streamingStatus && (
-            <div className="mt-6 p-5 bg-blue-50 border-l-4 border-blue-500 rounded-xl">
-              <p className="text-blue-700 font-semibold">{streamingStatus}</p>
-            </div>
-          )}
-
-          {error && (
-            <div className="mt-6 p-5 bg-red-50 border-l-4 border-red-500 rounded-xl">
-              <p className="text-red-700 font-semibold">❌ Error: {error}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Results */}
-        {results && (
-          <div className="space-y-8">
-            {/* Disease Info */}
-            <div className="bg-white rounded-2xl shadow-xl p-8">
-              <h2 className="text-4xl font-black text-gray-800 mb-6">
-                {results.disease_name}
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl p-6 text-white shadow-lg">
-                  <p className="text-sm opacity-90 mb-2">Associated Genes</p>
-                  <p className="text-4xl font-black">{results.disease_genes.length}</p>
-                </div>
-                <div className="bg-gradient-to-br from-purple-400 to-purple-600 rounded-xl p-6 text-white shadow-lg">
-                  <p className="text-sm opacity-90 mb-2">Pathways</p>
-                  <p className="text-4xl font-black">{results.disease_pathways.length}</p>
-                </div>
-                <div className="bg-gradient-to-br from-green-400 to-green-600 rounded-xl p-6 text-white shadow-lg">
-                  <p className="text-sm opacity-90 mb-2">Candidates Found</p>
-                  <p className="text-4xl font-black">{results.candidates.length}</p>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <h3 className="font-bold text-gray-800 mb-3 text-lg">🧬 Top Genes</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {results.disease_genes.slice(0, 10).map((gene) => (
-                      <span key={gene} className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
-                        {gene}
-                      </span>
-                    ))}
-                  </div>
+                  <label className="block text-green-400 font-mono mb-2 text-sm">
+                    {'>'} MAX_CANDIDATES:
+                  </label>
+                  <input
+                    type="number"
+                    value={maxResults}
+                    onChange={(e) => setMaxResults(Number(e.target.value))}
+                    min="1"
+                    max="50"
+                    className="terminal-input"
+                  />
                 </div>
+
                 <div>
-                  <h3 className="font-bold text-gray-800 mb-3 text-lg">🔬 Key Pathways</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {results.disease_pathways.slice(0, 5).map((pathway) => (
-                      <span key={pathway} className="px-4 py-2 bg-purple-100 text-purple-800 rounded-full text-sm font-semibold">
-                        {pathway}
-                      </span>
-                    ))}
+                  <label className="block text-green-400 font-mono mb-2 text-sm">
+                    {'>'} MIN_SCORE_THRESHOLD:
+                  </label>
+                  <input
+                    type="number"
+                    value={minScore}
+                    onChange={(e) => setMinScore(Number(e.target.value))}
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    className="terminal-input"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="terminal-button"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="loader"></span>
+                    ANALYZING...
+                  </span>
+                ) : (
+                  '⚡ INITIATE REPURPOSING ANALYSIS'
+                )}
+              </button>
+            </form>
+
+            {loadingMessage && (
+              <div className="mt-6 p-4 border-2 border-green-500 bg-black bg-opacity-50">
+                <p className="text-green-400 font-mono text-sm flex items-center gap-2">
+                  <span className="loader-small"></span>
+                  {loadingMessage}
+                </p>
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-6 p-4 border-2 border-red-500 bg-black bg-opacity-50">
+                <p className="text-red-400 font-mono text-sm font-bold mb-2">
+                  ❌ ERROR: {error.message}
+                </p>
+                <p className="text-yellow-400 font-mono text-xs">
+                  💡 SUGGESTION: {error.suggestion}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Results */}
+        {results && results.success && (
+          <div className="space-y-8">
+            {/* Disease Info */}
+            <div className="terminal-window">
+              <div className="terminal-header">
+                <div className="text-green-400 font-mono text-sm">
+                  DISEASE_ANALYSIS.DAT
+                </div>
+              </div>
+              
+              <div className="terminal-body">
+                <h2 className="text-4xl font-black text-green-400 mb-6 font-mono glitch-text" data-text={results.disease?.name}>
+                  {results.disease?.name || diseaseName}
+                </h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                  <div className="stat-card">
+                    <div className="stat-label">GENES_IDENTIFIED</div>
+                    <div className="stat-value">{results.disease?.genes_count || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">PATHWAYS_MAPPED</div>
+                    <div className="stat-value">{results.disease?.pathways_count || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">CANDIDATES_FOUND</div>
+                    <div className="stat-value">{results.candidates?.length || 0}</div>
                   </div>
                 </div>
+
+                {results.disease?.top_genes && results.disease.top_genes.length > 0 && (
+                  <div className="mb-4">
+                    <h3 className="text-green-400 font-mono mb-3 text-sm">
+                      {'>'} TARGET_GENES:
+                    </h3>
+                    <div className="flex flex-wrap gap-2">
+                      {results.disease.top_genes.map((gene) => (
+                        <span key={gene} className="gene-badge">
+                          {gene}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Drug Candidates */}
-            <div>
-              <h2 className="text-4xl font-black text-gray-800 mb-6">
-                💊 Drug Repurposing Candidates
-              </h2>
-              {results.candidates.length === 0 ? (
-                <div className="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded-xl">
-                  <p className="text-yellow-800 font-semibold">
-                    ⚠️ No candidates found with minimum score of {minScore}. Try lowering the minimum score to 0.1 or 0.2.
-                  </p>
+            <div className="terminal-window">
+              <div className="terminal-header">
+                <div className="text-green-400 font-mono text-sm">
+                  REPURPOSING_CANDIDATES.DAT
                 </div>
-              ) : (
-                <div className="space-y-6">
-                  {results.candidates.map((candidate, idx) => (
-                    <div
-                      key={candidate.drug_id}
-                      className="bg-white rounded-2xl shadow-xl p-6"
-                    >
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-grow">
-                          <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <h3 className="text-3xl font-black text-gray-800">
-                              #{idx + 1}. {candidate.drug_name}
-                            </h3>
-                            <span className={`px-4 py-1 rounded-full text-sm font-bold ${getConfidenceBadge(candidate.confidence)}`}>
-                              {candidate.confidence} Confidence
-                            </span>
-                          </div>
-                          <p className="text-gray-600 font-medium">
-                            💼 Current Use: {candidate.original_indication}
-                          </p>
-                        </div>
-                        <div className="text-right ml-4">
-                          <p className="text-sm text-gray-600 mb-1 font-semibold">Score</p>
-                          <p
-                            className="text-5xl font-black"
-                            style={{ color: getScoreColor(candidate.composite_score) }}
-                          >
-                            {(candidate.composite_score * 100).toFixed(0)}%
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mb-4">
-                        <p className="text-sm font-bold text-gray-800 mb-2">⚙️ Mechanism</p>
-                        <p className="text-gray-700 bg-gray-50 p-4 rounded-xl">{candidate.mechanism}</p>
-                      </div>
-
-                      {candidate.explanation && (
-                        <div className="mb-4">
-                          <p className="text-sm font-bold text-gray-800 mb-2">🎯 Why This Might Work</p>
-                          <p className="text-gray-700 bg-blue-50 p-4 rounded-xl">{candidate.explanation}</p>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                        <div className="bg-blue-100 rounded-xl p-4 text-center">
-                          <p className="text-xs text-blue-900 mb-1 font-bold">Gene Targeting</p>
-                          <p className="text-2xl font-black text-blue-900">
-                            {(candidate.gene_target_score * 100).toFixed(0)}%
-                          </p>
-                        </div>
-                        <div className="bg-purple-100 rounded-xl p-4 text-center">
-                          <p className="text-xs text-purple-900 mb-1 font-bold">Pathway Overlap</p>
-                          <p className="text-2xl font-black text-purple-900">
-                            {(candidate.pathway_overlap_score * 100).toFixed(0)}%
-                          </p>
-                        </div>
-                        <div className="bg-green-100 rounded-xl p-4 text-center">
-                          <p className="text-xs text-green-900 mb-1 font-bold">Shared Genes</p>
-                          <p className="text-2xl font-black text-green-900">{candidate.shared_genes.length}</p>
-                        </div>
-                        <div className="bg-pink-100 rounded-xl p-4 text-center">
-                          <p className="text-xs text-pink-900 mb-1 font-bold">Shared Pathways</p>
-                          <p className="text-2xl font-black text-pink-900">{candidate.shared_pathways.length}</p>
-                        </div>
-                      </div>
-
-                      {candidate.shared_genes.length > 0 && (
-                        <div className="mb-3">
-                          <p className="text-sm font-bold text-gray-800 mb-2">🎯 Shared Target Genes</p>
-                          <div className="flex flex-wrap gap-2">
-                            {candidate.shared_genes.map((gene) => (
-                              <span key={gene} className="px-3 py-1 bg-green-100 text-green-900 rounded-lg text-xs font-bold">
-                                {gene}
+              </div>
+              
+              <div className="terminal-body">
+                {results.candidates && results.candidates.length === 0 ? (
+                  <div className="p-6 border-2 border-yellow-500 bg-black bg-opacity-50">
+                    <p className="text-yellow-400 font-mono">
+                      ⚠️ NO CANDIDATES FOUND WITH SCORE {'>'} {minScore}
+                    </p>
+                    <p className="text-green-400 font-mono text-sm mt-2">
+                      💡 Try lowering minimum score to 0.1 or 0.2
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {results.candidates && results.candidates.map((candidate, idx) => (
+                      <div key={idx} className="drug-card">
+                        <div className="flex items-start justify-between mb-4 flex-wrap gap-4">
+                          <div className="flex-grow">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              {/* 3D Molecule Visualization */}
+                              <div className="molecule-3d">
+                                <div className="molecule-atom"></div>
+                                <div className="molecule-atom"></div>
+                                <div className="molecule-atom"></div>
+                              </div>
+                              
+                              <h3 className="text-3xl font-black text-green-400 font-mono">
+                                #{idx + 1} {candidate.drug_name}
+                              </h3>
+                              <span className={`px-3 py-1 rounded text-xs font-bold font-mono ${getConfidenceBadge(candidate.confidence)}`}>
+                                {candidate.confidence?.toUpperCase() || 'N/A'} CONFIDENCE
                               </span>
-                            ))}
+                            </div>
+                            <p className="text-green-300 font-mono text-sm">
+                              {'>'} CURRENT_USE: {candidate.indication || candidate.original_indication || 'Unknown'}
+                            </p>
+                          </div>
+                          
+                          <div className="score-display">
+                            <div className="score-label">MATCH_SCORE</div>
+                            <div 
+                              className="score-value"
+                              style={{ color: getScoreColor(candidate.composite_score || candidate.score || 0) }}
+                            >
+                              {((candidate.composite_score || candidate.score || 0) * 100).toFixed(0)}%
+                            </div>
                           </div>
                         </div>
-                      )}
 
-                      {candidate.shared_pathways.length > 0 && (
-                        <div>
-                          <p className="text-sm font-bold text-gray-800 mb-2">🔬 Shared Pathways</p>
-                          <div className="flex flex-wrap gap-2">
-                            {candidate.shared_pathways.map((pathway) => (
-                              <span key={pathway} className="px-3 py-1 bg-purple-100 text-purple-900 rounded-lg text-xs font-bold">
-                                {pathway}
-                              </span>
-                            ))}
+                        {candidate.mechanism && (
+                          <div className="mb-4">
+                            <p className="text-green-400 font-mono text-xs mb-2">
+                              {'>'} MECHANISM_OF_ACTION:
+                            </p>
+                            <p className="text-green-300 font-mono text-sm p-3 bg-black bg-opacity-50 border border-green-900">
+                              {candidate.mechanism}
+                            </p>
+                          </div>
+                        )}
+
+                        {candidate.explanation && (
+                          <div className="mb-4">
+                            <p className="text-green-400 font-mono text-xs mb-2">
+                              {'>'} REPURPOSING_RATIONALE:
+                            </p>
+                            <p className="text-green-300 font-mono text-sm p-3 bg-black bg-opacity-50 border border-green-900">
+                              {candidate.explanation}
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                          <div className="metric-box">
+                            <div className="metric-label">GENE_SCORE</div>
+                            <div className="metric-value">
+                              {((candidate.gene_target_score || candidate.gene_score || 0) * 100).toFixed(0)}%
+                            </div>
+                          </div>
+                          <div className="metric-box">
+                            <div className="metric-label">PATHWAY_SCORE</div>
+                            <div className="metric-value">
+                              {((candidate.pathway_overlap_score || candidate.pathway_score || 0) * 100).toFixed(0)}%
+                            </div>
+                          </div>
+                          <div className="metric-box">
+                            <div className="metric-label">SHARED_GENES</div>
+                            <div className="metric-value">
+                              {candidate.shared_genes?.length || 0}
+                            </div>
+                          </div>
+                          <div className="metric-box">
+                            <div className="metric-label">SHARED_PATHWAYS</div>
+                            <div className="metric-value">
+                              {candidate.shared_pathways?.length || 0}
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+
+                        {candidate.shared_genes && candidate.shared_genes.length > 0 && (
+                          <div className="mb-3">
+                            <p className="text-green-400 font-mono text-xs mb-2">
+                              {'>'} SHARED_TARGET_GENES:
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {candidate.shared_genes.map((gene) => (
+                                <span key={gene} className="gene-badge-small">
+                                  {gene}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {candidate.shared_pathways && candidate.shared_pathways.length > 0 && (
+                          <div>
+                            <p className="text-green-400 font-mono text-xs mb-2">
+                              {'>'} SHARED_BIOLOGICAL_PATHWAYS:
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {candidate.shared_pathways.map((pathway) => (
+                                <span key={pathway} className="pathway-badge">
+                                  {pathway}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
+      </div>
+
+      {/* Footer */}
+      <div className="text-center py-8 relative z-10">
+        <p className="text-green-400 font-mono text-sm">
+          POWERED BY: OpenTargets • ChEMBL • DGIdb • ClinicalTrials.gov
+        </p>
       </div>
     </div>
   );

@@ -76,7 +76,7 @@ class ProductionPipeline:
         logger.info("\n💊 Step 2/5: Fetching approved drugs from ChEMBL...")
         
         if self.drugs_cache is None:
-            drugs_data = await self.data_fetcher.fetch_approved_drugs(limit=200)  # Increased from 500 for better coverage
+            drugs_data = await self.data_fetcher.fetch_approved_drugs(limit=500)  # Increased from 500 for better coverage
             self.drugs_cache = drugs_data
             logger.info(f"✅ Fetched {len(drugs_data)} approved drugs (cached for future queries)")
         else:
