@@ -1,216 +1,205 @@
-"""
-FastAPI Backend for Drug Repurposing Platform
-Uses production pipeline with real API integrations
-"""
-
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
 import logging
-import asyncio
-
-# Import production pipeline
 from pipeline.production_pipeline import ProductionPipeline
+from pipeline.clinical_validator import ClinicalValidator
+from pipeline.drug_filter import DrugSafetyFilter
 
-# Setup logging
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
 app = FastAPI(
     title="Drug Repurposing API",
-    description="Find drug repurposing candidates using real databases",
+    description="AI-powered drug repurposing using gene-disease relationships",
     version="2.0.0"
 )
 
-# CORS middleware - CRITICAL for frontend to work
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global pipeline instance (reuses cache)
+# Global pipeline instance
 pipeline = None
-
-
-class AnalyzeRequest(BaseModel):
-    """Request model for disease analysis"""
-    disease_name: str
-    min_score: float = 0.2
-    max_results: int = 20
-
-
-class HealthResponse(BaseModel):
-    """Health check response"""
-    status: str
-    message: str
-
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize pipeline on startup"""
+    """Initialize the pipeline on startup."""
     global pipeline
     logger.info("🚀 Starting Drug Repurposing API...")
     logger.info("📊 Databases: OpenTargets, ChEMBL, DGIdb, ClinicalTrials.gov")
-    pipeline = ProductionPipeline()
-    logger.info("✅ API ready!")
-
+    try:
+        pipeline = ProductionPipeline()
+        await pipeline.initialize()
+        logger.info("✅ API ready!")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize pipeline: {e}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
+    """Clean up on shutdown."""
     global pipeline
     if pipeline:
         await pipeline.close()
-    logger.info("👋 API shutting down")
+    logger.info("👋 API shutdown complete")
 
-
-@app.get("/", tags=["General"])
+@app.get("/", tags=["Health"])
 async def root():
-    """Root endpoint"""
+    """Health check endpoint."""
     return {
-        "message": "Drug Repurposing API",
-        "version": "2.0.0",
-        "docs": "/docs",
-        "health": "/health"
+        "status": "online",
+        "service": "Drug Repurposing API",
+        "version": "2.0.0"
     }
-
-
-@app.get("/health", response_model=HealthResponse, tags=["General"])
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "message": "API is running with production databases"
-    }
-
 
 @app.post("/analyze", tags=["Analysis"])
-async def analyze_disease(request: AnalyzeRequest):
+async def analyze_disease(request: dict):
     """
-    Analyze a disease and find drug repurposing candidates.
-    
-    Returns proper JSON response with error handling for unrecognized diseases.
+    Analyze a disease and find repurposing candidates with safety filtering.
     """
     global pipeline
     
     if not pipeline:
         return {
             "success": False,
-            "error": "Pipeline not initialized. Please try again in a moment.",
-            "suggestion": "The server is starting up. Please wait a few seconds and try again.",
-            "disease": None,
-            "candidates": [],
-            "metadata": {}
+            "error": "Pipeline not initialized"
         }
     
     try:
-        logger.info(f"📥 Received analysis request for: {request.disease_name}")
-        logger.info(f"   Min score: {request.min_score}, Max results: {request.max_results}")
+        disease_name = request.get('disease_name')
+        min_score = request.get('min_score', 0.2)
+        max_results = request.get('max_results', 10)
         
-        # Run analysis
-        result = await pipeline.analyze_disease(
-            disease_name=request.disease_name,
-            min_score=request.min_score,
-            max_results=request.max_results
-        )
-        
-        if not result.get('success'):
-            logger.warning(f"❌ Disease not found: {request.disease_name}")
-            # Return user-friendly error message without crashing
+        if not disease_name:
             return {
                 "success": False,
-                "error": f"Disease '{request.disease_name}' not found in our database.",
-                "suggestion": "Please check the spelling or try using the full medical name (e.g., 'Parkinson Disease' instead of 'Parkinsons'). You can also try searching for related conditions.",
-                "disease": None,
-                "candidates": [],
-                "metadata": {
-                    "searched_term": request.disease_name,
-                    "databases_checked": ["OpenTargets", "ChEMBL", "DGIdb"]
-                }
+                "error": "Missing disease_name"
             }
         
-        logger.info(f"✅ Analysis complete: {len(result.get('candidates', []))} candidates found")
+        logger.info(f"Analysis request: {disease_name}")
+        
+        # Run gene-based analysis (FIXED METHOD NAME)
+        result = await pipeline.analyze_disease(
+            disease_name=disease_name,
+            min_score=min_score,
+            max_results=max_results * 2  # Get extra candidates before filtering
+        )
+        
+        if not result['success']:
+            return result
+        
+        # ⭐ NEW: Apply safety filter
+        safety_filter = DrugSafetyFilter()
+        
+        original_count = len(result.get('candidates', []))
+        
+        safe_candidates, filtered_out = safety_filter.filter_candidates(
+            candidates=result.get('candidates', []),
+            disease_name=disease_name,
+            remove_absolute=True,   # Remove absolutely contraindicated
+            remove_relative=False   # Keep relatively contraindicated (with warning)
+        )
+        
+        # Limit to requested max_results after filtering
+        safe_candidates = safe_candidates[:max_results]
+        
+        logger.info(
+            f"Safety filter: {original_count} → {len(safe_candidates)} candidates "
+            f"({len(filtered_out)} filtered out)"
+        )
+        
+        # Update result with filtered candidates
+        result['candidates'] = safe_candidates
+        result['filtered_count'] = len(filtered_out)
+        result['filtered_drugs'] = [
+            {
+                'drug_name': c['drug_name'],
+                'reason': c.get('contraindication', {}).get('reason', 'Unknown'),
+                'severity': c.get('contraindication', {}).get('severity', 'unknown')
+            }
+            for c in filtered_out
+        ]
+        
         return result
     
     except Exception as e:
-        logger.error(f"❌ Error during analysis: {e}")
+        logger.error(f"Analysis error: {e}")
         import traceback
         traceback.print_exc()
         
-        # Return error without crashing the app
         return {
             "success": False,
-            "error": "An unexpected error occurred during analysis.",
-            "suggestion": "Please try again or contact support if the issue persists. Make sure you're using a valid disease name.",
-            "disease": None,
-            "candidates": [],
-            "metadata": {
-                "error_details": str(e)
-            }
+            "error": str(e)
         }
 
-
-@app.get("/diseases/search", tags=["Search"])
-async def search_diseases(query: str):
+@app.post("/validate_clinical", tags=["Analysis"])
+async def validate_clinical(request: dict):
     """
-    Search for diseases by name (future feature).
-    Currently returns suggestions for common searches.
+    Validate a drug candidate clinically using multiple databases.
+    
+    Checks:
+    - Clinical trials (ClinicalTrials.gov)
+    - Literature evidence (PubMed)
+    - Safety signals (OpenFDA)
+    - Mechanism compatibility
     """
-    suggestions = [
-        "Parkinson Disease",
-        "Huntington Disease",
-        "Gaucher Disease",
-        "Wilson Disease",
-        "Duchenne Muscular Dystrophy",
-        "Cystic Fibrosis",
-        "Alzheimer Disease",
-        "ALS (Amyotrophic Lateral Sclerosis)",
-        "Fabry Disease",
-        "Pompe Disease",
-        "Multiple Sclerosis",
-        "Rheumatoid Arthritis",
-        "Type 2 Diabetes",
-        "Breast Cancer",
-        "Lung Cancer",
-    ]
+    global pipeline
     
-    # Simple filter by query
-    filtered = [d for d in suggestions if query.lower() in d.lower()]
+    if not pipeline:
+        return {
+            "success": False,
+            "error": "Pipeline not initialized"
+        }
     
-    return {
-        "query": query,
-        "suggestions": filtered[:10] if filtered else suggestions[:10]
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
+    try:
+        drug_name = request.get('drug_name')
+        disease_name = request.get('disease_name')
+        drug_data = request.get('drug_data', {})
+        disease_data = request.get('disease_data', {})
+        
+        if not drug_name or not disease_name:
+            return {
+                "success": False,
+                "error": "Missing drug_name or disease_name"
+            }
+        
+        logger.info(f"Clinical validation request: {drug_name} for {disease_name}")
+        
+        # Create validator
+        validator = ClinicalValidator()
+        
+        try:
+            # Run validation
+            validation_result = await validator.validate_candidate(
+                drug_name=drug_name,
+                disease_name=disease_name,
+                drug_data=drug_data,
+                disease_data=disease_data
+            )
+            
+            return {
+                "success": True,
+                "validation": validation_result
+            }
+        
+        finally:
+            await validator.close()
     
-    print("\n" + "="*70)
-    print("🧬 Drug Repurposing Platform - Backend Server")
-    print("="*70)
-    print("\n📊 Connected to:")
-    print("   • OpenTargets Platform (25,000+ diseases)")
-    print("   • ChEMBL (15,000+ approved drugs)")
-    print("   • DGIdb (50,000+ drug-gene interactions)")
-    print("   • ClinicalTrials.gov (real-time trial data)")
-    print("\n🌐 Starting server at: http://localhost:8000")
-    print("📖 API Docs at: http://localhost:8000/docs")
-    print("\n💡 Note: First query takes 30-60s (fetching + caching)")
-    print("         Subsequent queries: <2 seconds\n")
-    
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    except Exception as e:
+        logger.error(f"Clinical validation error: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            "success": False,
+            "error": str(e)
+        }

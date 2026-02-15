@@ -9,12 +9,15 @@ function App() {
   const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [validatingIndex, setValidatingIndex] = useState(null);
+  const [clinicalResults, setClinicalResults] = useState({});
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setResults(null);
+    setClinicalResults({});
     setLoadingMessage('🔍 Searching for disease in database...');
 
     try {
@@ -33,7 +36,6 @@ function App() {
       const data = await response.json();
 
       if (!data.success) {
-        // Handle error gracefully without crashing
         setError({
           message: data.error || 'An error occurred',
           suggestion: data.suggestion || 'Please try again with a different disease name.'
@@ -43,7 +45,6 @@ function App() {
         return;
       }
 
-      // Success - set results
       setResults(data);
       setLoadingMessage('');
       
@@ -59,10 +60,70 @@ function App() {
     }
   };
 
+  const handleClinicalValidation = async (candidate, index) => {
+    setValidatingIndex(index);
+    
+    try {
+      const response = await fetch('http://localhost:8000/validate_clinical', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          drug_name: candidate.drug_name,
+          disease_name: results.disease.name,
+          drug_data: {
+            mechanism: candidate.mechanism,
+            indication: candidate.indication
+          },
+          disease_data: {
+            name: results.disease.name,
+            description: results.disease.description
+          }
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setClinicalResults(prev => ({
+          ...prev,
+          [index]: data.validation
+        }));
+      } else {
+        setClinicalResults(prev => ({
+          ...prev,
+          [index]: {
+            error: data.error || 'Validation failed'
+          }
+        }));
+      }
+    } catch (err) {
+      console.error('Clinical validation error:', err);
+      setClinicalResults(prev => ({
+        ...prev,
+        [index]: {
+          error: 'Failed to connect to validation service'
+        }
+      }));
+    } finally {
+      setValidatingIndex(null);
+    }
+  };
+
+  const getRiskColor = (riskLevel) => {
+    switch(riskLevel) {
+      case 'LOW': return '#10b981';
+      case 'MEDIUM': return '#f59e0b';
+      case 'HIGH': return '#ef4444';
+      default: return '#6b7280';
+    }
+  };
+
   const getScoreColor = (score) => {
-    if (score >= 0.7) return '#10b981'; // green
-    if (score >= 0.5) return '#f59e0b'; // yellow
-    return '#ef4444'; // red
+    if (score >= 0.7) return '#10b981';
+    if (score >= 0.5) return '#f59e0b';
+    return '#ef4444';
   };
 
   const getConfidenceBadge = (confidence) => {
@@ -74,7 +135,6 @@ function App() {
     return colors[confidence?.toLowerCase()] || colors.low;
   };
 
-  // Rotate 3D molecules
   useEffect(() => {
     if (results) {
       const molecules = document.querySelectorAll('.molecule-3d');
@@ -270,6 +330,50 @@ function App() {
               </div>
             </div>
 
+            {/* Filtered Out Drugs Section */}
+            {results.filtered_count > 0 && (
+              <div className="terminal-window">
+                <div className="terminal-header">
+                  <div className="text-red-400 font-mono text-sm">
+                    ⛔ CONTRAINDICATED_DRUGS.DAT ({results.filtered_count} FILTERED)
+                  </div>
+                </div>
+                
+                <div className="terminal-body">
+                  <div className="p-4 bg-red-900 bg-opacity-20 border-2 border-red-500 rounded mb-4">
+                    <p className="text-red-400 font-mono text-sm font-bold mb-2">
+                      ⚠️ WARNING: These drugs were REMOVED due to contraindications
+                    </p>
+                    <p className="text-red-300 font-mono text-xs">
+                      These medications could be harmful for {results.disease?.name || diseaseName}
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {results.filtered_drugs && results.filtered_drugs.map((drug, idx) => (
+                      <div key={idx} className="p-4 bg-black bg-opacity-50 border-2 border-red-500 rounded">
+                        <div className="flex items-start justify-between mb-2 flex-wrap gap-2">
+                          <h3 className="text-xl font-black text-red-400 font-mono">
+                            ❌ {drug.drug_name}
+                          </h3>
+                          <span className={`px-3 py-1 rounded text-xs font-bold font-mono ${
+                            drug.severity === 'absolute' 
+                              ? 'bg-red-600 text-white' 
+                              : 'bg-yellow-600 text-white'
+                          }`}>
+                            {drug.severity?.toUpperCase()} CONTRAINDICATION
+                          </span>
+                        </div>
+                        <p className="text-red-300 font-mono text-sm">
+                          {'>'} REASON: {drug.reason}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Drug Candidates */}
             <div className="terminal-window">
               <div className="terminal-header">
@@ -390,7 +494,7 @@ function App() {
                         )}
 
                         {candidate.shared_pathways && candidate.shared_pathways.length > 0 && (
-                          <div>
+                          <div className="mb-4">
                             <p className="text-green-400 font-mono text-xs mb-2">
                               {'>'} SHARED_BIOLOGICAL_PATHWAYS:
                             </p>
@@ -403,6 +507,130 @@ function App() {
                             </div>
                           </div>
                         )}
+
+                        {/* Clinical Validation Button */}
+                        <div className="mt-4 pt-4 border-t border-green-900">
+                          {!clinicalResults[idx] && (
+                            <button
+                              onClick={() => handleClinicalValidation(candidate, idx)}
+                              disabled={validatingIndex === idx}
+                              className="w-full px-4 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-mono font-bold rounded border-2 border-cyan-400 hover:from-cyan-500 hover:to-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {validatingIndex === idx ? (
+                                <span className="flex items-center justify-center gap-2">
+                                  <span className="loader-small"></span>
+                                  VALIDATING CLINICALLY...
+                                </span>
+                              ) : (
+                                '🔬 VALIDATE CLINICALLY'
+                              )}
+                            </button>
+                          )}
+
+                          {/* Clinical Validation Results */}
+                          {clinicalResults[idx] && !clinicalResults[idx].error && (
+                            <div className="mt-4 space-y-4">
+                              <div className="p-4 bg-gradient-to-r from-cyan-900 to-blue-900 border-2 border-cyan-400 rounded">
+                                <h4 className="text-cyan-300 font-mono font-bold mb-3 flex items-center gap-2">
+                                  🏥 CLINICAL VALIDATION RESULTS
+                                </h4>
+                                
+                                {/* Risk Level */}
+                                <div className="mb-4 p-3 bg-black bg-opacity-50 rounded border-2" style={{borderColor: getRiskColor(clinicalResults[idx].risk_level)}}>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-white font-mono text-sm">RISK LEVEL:</span>
+                                    <span 
+                                      className="font-mono font-black text-xl"
+                                      style={{color: getRiskColor(clinicalResults[idx].risk_level)}}
+                                    >
+                                      {clinicalResults[idx].risk_level}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Recommendation */}
+                                <div className="mb-4 p-3 bg-black bg-opacity-50 rounded">
+                                  <p className="text-cyan-200 font-mono text-sm font-bold">
+                                    {clinicalResults[idx].recommendation}
+                                  </p>
+                                </div>
+
+                                {/* Evidence Summary */}
+                                <div className="mb-4">
+                                  <p className="text-cyan-300 font-mono text-xs mb-2">EVIDENCE SUMMARY:</p>
+                                  <div className="space-y-1">
+                                    {clinicalResults[idx].evidence_summary?.map((item, i) => (
+                                      <p key={i} className="text-cyan-100 font-mono text-xs">
+                                        {item}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {/* Detailed Results */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* Clinical Trials */}
+                                  {clinicalResults[idx].clinical_trials && (
+                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
+                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">📋 CLINICAL TRIALS:</p>
+                                      <p className="text-cyan-100 font-mono text-xs">
+                                        {clinicalResults[idx].clinical_trials.summary || 'No trials found'}
+                                      </p>
+                                      {clinicalResults[idx].clinical_trials.trials?.length > 0 && (
+                                        <div className="mt-2 space-y-1">
+                                          {clinicalResults[idx].clinical_trials.trials.slice(0, 3).map((trial, i) => (
+                                            <div key={i} className="text-cyan-200 font-mono text-xs">
+                                              • {trial.phase} - {trial.status}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Literature */}
+                                  {clinicalResults[idx].literature_evidence && (
+                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
+                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">📚 LITERATURE:</p>
+                                      <p className="text-cyan-100 font-mono text-xs">
+                                        {clinicalResults[idx].literature_evidence.summary || 'No literature found'}
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {/* Safety */}
+                                  {clinicalResults[idx].safety_signals && (
+                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
+                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">⚠️ SAFETY:</p>
+                                      <p className="text-cyan-100 font-mono text-xs">
+                                        {clinicalResults[idx].safety_signals.summary || 'No safety data'}
+                                      </p>
+                                    </div>
+                                  )}
+
+                                  {/* Mechanism */}
+                                  {clinicalResults[idx].mechanism_analysis && (
+                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
+                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">⚙️ MECHANISM:</p>
+                                      <p className="text-cyan-100 font-mono text-xs">
+                                        {clinicalResults[idx].mechanism_analysis.summary || 'Unknown'}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Error Display */}
+                          {clinicalResults[idx]?.error && (
+                            <div className="mt-4 p-4 bg-red-900 bg-opacity-30 border-2 border-red-500 rounded">
+                              <p className="text-red-400 font-mono text-sm">
+                                ❌ Validation Error: {clinicalResults[idx].error}
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -416,7 +644,7 @@ function App() {
       {/* Footer */}
       <div className="text-center py-8 relative z-10">
         <p className="text-green-400 font-mono text-sm">
-          POWERED BY: OpenTargets • ChEMBL • DGIdb • ClinicalTrials.gov
+          POWERED BY: OpenTargets • ChEMBL • DGIdb • ClinicalTrials.gov • PubMed • OpenFDA
         </p>
       </div>
     </div>
