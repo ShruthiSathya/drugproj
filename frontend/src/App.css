@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&display=swap');
 
 * {
   margin: 0;
@@ -7,449 +7,365 @@
 }
 
 body {
-  font-family: 'IBM Plex Mono', 'Space Mono', 'Courier New', monospace;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: #000;
-  color: #00ff00;
+  font-family: 'Courier Prime', 'Courier New', monospace;
+  background: #f5f5f0;
+  color: #000;
 }
 
-/* Graph paper background with animation */
-.grid-line-h {
-  position: absolute;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #00ff00, transparent);
-  top: 50%;
-  animation: scanlineH 8s linear infinite;
-  opacity: 0.3;
+/* Graph Paper Background */
+.graph-paper-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-color: #f5f5f0;
+  background-image: 
+    linear-gradient(to right, #d0d0c8 1px, transparent 1px),
+    linear-gradient(to bottom, #d0d0c8 1px, transparent 1px),
+    linear-gradient(to right, #a0a098 2px, transparent 2px),
+    linear-gradient(to bottom, #a0a098 2px, transparent 2px);
+  background-size: 
+    20px 20px,
+    20px 20px,
+    100px 100px,
+    100px 100px;
+  background-position: 
+    -1px -1px,
+    -1px -1px,
+    -2px -2px,
+    -2px -2px;
 }
 
-.grid-line-v {
-  position: absolute;
-  width: 2px;
-  height: 100%;
-  background: linear-gradient(180deg, transparent, #00ff00, transparent);
-  left: 50%;
-  animation: scanlineV 6s linear infinite;
-  opacity: 0.3;
-}
-
-@keyframes scanlineH {
-  0% { top: 0%; }
-  100% { top: 100%; }
-}
-
-@keyframes scanlineV {
-  0% { left: 0%; }
-  100% { left: 100%; }
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 12px;
-}
-
-::-webkit-scrollbar-track {
-  background: #000;
-  border: 1px solid #00ff00;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #00ff00;
-  border: 2px solid #000;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #00cc00;
-  box-shadow: 0 0 10px #00ff00;
-}
-
-/* Glitch text effect */
-.glitch-text {
+.container {
   position: relative;
-  text-shadow: 
-    0 0 10px rgba(0, 255, 0, 0.8),
-    0 0 20px rgba(0, 255, 0, 0.6),
-    0 0 30px rgba(0, 255, 0, 0.4);
-  animation: glitch 3s infinite;
+  z-index: 10;
 }
 
-@keyframes glitch {
-  0%, 90%, 100% {
-    transform: translate(0);
-  }
-  92% {
-    transform: translate(-2px, 2px);
-  }
-  94% {
-    transform: translate(2px, -2px);
-  }
-  96% {
-    transform: translate(-2px, -2px);
-  }
-}
-
-/* Status indicator */
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: rgba(0, 255, 0, 0.1);
-  border: 1px solid #00ff00;
-  border-radius: 4px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  background: #00ff00;
-  border-radius: 50%;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% {
-    box-shadow: 0 0 5px #00ff00, 0 0 10px #00ff00;
-  }
-  50% {
-    box-shadow: 0 0 10px #00ff00, 0 0 20px #00ff00, 0 0 30px #00ff00;
-  }
-}
-
-/* Terminal window */
+/* Terminal Window */
 .terminal-window {
-  background: rgba(0, 0, 0, 0.9);
-  border: 2px solid #00ff00;
-  border-radius: 8px;
-  box-shadow: 
-    0 0 20px rgba(0, 255, 0, 0.3),
-    inset 0 0 50px rgba(0, 255, 0, 0.05);
+  background: #fff;
+  border: 4px solid #000;
+  margin-bottom: 2rem;
+  box-shadow: 8px 8px 0px 0px rgba(0, 0, 0, 1);
 }
 
 .terminal-header {
-  background: rgba(0, 255, 0, 0.1);
-  border-bottom: 2px solid #00ff00;
-  padding: 12px 16px;
+  background: #000;
+  color: #fff;
+  padding: 1rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  font-weight: bold;
+  letter-spacing: 0.1em;
 }
 
 .terminal-body {
-  padding: 24px;
+  padding: 2rem;
+  background: #fff;
 }
 
-/* Terminal input */
+/* Input Styles */
 .terminal-input {
   width: 100%;
-  padding: 12px 16px;
-  background: rgba(0, 0, 0, 0.8);
-  border: 2px solid #00ff00;
-  color: #00ff00;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 16px;
-  border-radius: 4px;
-  transition: all 0.3s;
+  padding: 0.75rem 1rem;
+  border: 3px solid #000;
+  background: #fff;
+  color: #000;
+  font-family: 'Courier Prime', monospace;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: all 0.2s;
 }
 
 .terminal-input:focus {
   outline: none;
-  box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
-  background: rgba(0, 255, 0, 0.05);
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.1);
 }
 
 .terminal-input::placeholder {
-  color: rgba(0, 255, 0, 0.4);
+  color: #666;
 }
 
-/* Terminal button */
+/* Button */
 .terminal-button {
   width: 100%;
-  padding: 16px;
-  background: #00ff00;
-  color: #000;
-  font-family: 'IBM Plex Mono', monospace;
-  font-weight: 700;
-  font-size: 18px;
-  border: none;
-  border-radius: 4px;
+  padding: 1rem 2rem;
+  background: #000;
+  color: #fff;
+  border: 3px solid #000;
+  font-family: 'Courier Prime', monospace;
+  font-weight: bold;
+  font-size: 1rem;
   cursor: pointer;
-  transition: all 0.3s;
-  text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 0.1em;
+  transition: all 0.2s;
+  margin-top: 1rem;
 }
 
 .terminal-button:hover:not(:disabled) {
-  background: #00cc00;
-  box-shadow: 0 0 30px rgba(0, 255, 0, 0.7);
-  transform: translateY(-2px);
+  background: #333;
+  transform: translate(2px, 2px);
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 1);
 }
 
 .terminal-button:disabled {
-  opacity: 0.6;
+  background: #ccc;
+  color: #666;
   cursor: not-allowed;
+  border-color: #999;
 }
 
-/* Loader animation */
-.loader {
-  width: 16px;
-  height: 16px;
+/* Glitch Text Effect */
+.glitch-text {
+  position: relative;
+  font-family: 'Courier Prime', monospace;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+/* Status Indicator */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
   border: 2px solid #000;
-  border-top: 2px solid transparent;
+  background: #fff;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  background: #000;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  display: inline-block;
+  animation: pulse 2s ease-in-out infinite;
 }
 
-.loader-small {
-  width: 12px;
-  height: 12px;
-  border: 2px solid #00ff00;
-  border-top: 2px solid transparent;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  display: inline-block;
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-/* Stat cards */
+/* Stat Cards */
 .stat-card {
-  background: rgba(0, 255, 0, 0.05);
-  border: 2px solid #00ff00;
-  border-radius: 8px;
-  padding: 20px;
+  border: 3px solid #000;
+  padding: 1.5rem;
+  background: #fff;
   text-align: center;
-  transition: all 0.3s;
-}
-
-.stat-card:hover {
-  background: rgba(0, 255, 0, 0.1);
-  box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
-  transform: translateY(-4px);
 }
 
 .stat-label {
-  font-size: 12px;
-  color: rgba(0, 255, 0, 0.7);
-  margin-bottom: 8px;
-  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  color: #000;
+  margin-bottom: 0.5rem;
 }
 
 .stat-value {
-  font-size: 36px;
-  font-weight: 700;
-  color: #00ff00;
-  text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-  font-family: 'IBM Plex Mono', monospace;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: #000;
 }
 
-/* Gene badges */
+/* Gene Badge */
 .gene-badge {
-  padding: 8px 16px;
-  background: rgba(0, 255, 0, 0.1);
-  border: 1px solid #00ff00;
-  border-radius: 4px;
-  color: #00ff00;
-  font-size: 12px;
-  font-weight: 600;
-  font-family: 'IBM Plex Mono', monospace;
-  transition: all 0.3s;
-}
-
-.gene-badge:hover {
-  background: rgba(0, 255, 0, 0.2);
-  box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-  transform: scale(1.05);
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  background: #fff;
+  border: 2px solid #000;
+  color: #000;
+  font-weight: bold;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
 }
 
 .gene-badge-small {
-  padding: 6px 12px;
-  background: rgba(0, 255, 0, 0.1);
-  border: 1px solid #00ff00;
-  border-radius: 3px;
-  color: #00ff00;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: 'IBM Plex Mono', monospace;
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: #f0f0f0;
+  border: 1px solid #000;
+  color: #000;
+  font-weight: bold;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
 }
 
-/* Pathway badges */
+/* Pathway Badge */
 .pathway-badge {
-  padding: 6px 12px;
-  background: rgba(0, 200, 200, 0.1);
-  border: 1px solid #00cccc;
-  border-radius: 3px;
-  color: #00cccc;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: 'IBM Plex Mono', monospace;
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: #e0e0e0;
+  border: 1px solid #000;
+  color: #000;
+  font-weight: bold;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
 }
 
-/* Drug card */
+/* Drug Card */
 .drug-card {
-  background: rgba(0, 0, 0, 0.8);
-  border: 2px solid #00ff00;
-  border-radius: 8px;
-  padding: 24px;
-  transition: all 0.3s;
+  padding: 2rem;
+  border: 3px solid #000;
+  background: #fff;
+  margin-bottom: 1.5rem;
+  transition: all 0.2s;
 }
 
 .drug-card:hover {
-  box-shadow: 0 0 30px rgba(0, 255, 0, 0.4);
-  transform: translateY(-4px);
-  border-color: #00cc00;
+  box-shadow: 6px 6px 0px 0px rgba(0, 0, 0, 1);
+  transform: translate(-2px, -2px);
 }
 
-/* 3D Molecule visualization */
-.molecule-3d {
-  width: 60px;
-  height: 60px;
-  position: relative;
-  transform-style: preserve-3d;
-  margin-right: 12px;
-}
-
-.molecule-atom {
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  background: #00ff00;
-  border-radius: 50%;
-  box-shadow: 
-    0 0 10px #00ff00,
-    0 0 20px rgba(0, 255, 0, 0.5),
-    inset 0 0 5px rgba(255, 255, 255, 0.5);
-}
-
-.molecule-atom:nth-child(1) {
-  top: 0;
-  left: 20px;
-}
-
-.molecule-atom:nth-child(2) {
-  top: 30px;
-  left: 0;
-}
-
-.molecule-atom:nth-child(3) {
-  top: 30px;
-  left: 40px;
-}
-
-@keyframes rotate3d {
-  0% {
-    transform: rotateX(0deg) rotateY(0deg);
-  }
-  50% {
-    transform: rotateX(180deg) rotateY(180deg);
-  }
-  100% {
-    transform: rotateX(360deg) rotateY(360deg);
-  }
-}
-
-/* Score display */
+/* Score Display */
 .score-display {
-  text-align: right;
-  min-width: 120px;
+  text-align: center;
+  border: 3px solid #000;
+  padding: 1rem;
+  background: #fff;
+  min-width: 150px;
 }
 
 .score-label {
-  font-size: 10px;
-  color: rgba(0, 255, 0, 0.7);
-  margin-bottom: 4px;
-  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  color: #000;
+  margin-bottom: 0.5rem;
 }
 
 .score-value {
-  font-size: 48px;
-  font-weight: 700;
-  font-family: 'IBM Plex Mono', monospace;
-  text-shadow: 0 0 20px currentColor;
+  font-size: 3rem;
+  font-weight: 900;
+  color: #000;
 }
 
-/* Metric boxes */
+/* Metric Box */
 .metric-box {
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid #00ff00;
-  border-radius: 4px;
-  padding: 12px;
+  border: 2px solid #000;
+  padding: 1rem;
+  background: #f8f8f8;
   text-align: center;
 }
 
 .metric-label {
-  font-size: 9px;
-  color: rgba(0, 255, 0, 0.7);
-  margin-bottom: 4px;
-  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.625rem;
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  color: #000;
+  margin-bottom: 0.5rem;
 }
 
 .metric-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #00ff00;
-  font-family: 'IBM Plex Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #000;
 }
 
-/* Scanline effect */
-body::before {
-  content: "";
-  position: fixed;
+/* Molecule 3D */
+.molecule-3d {
+  width: 40px;
+  height: 40px;
+  position: relative;
+  transform-style: preserve-3d;
+  animation: rotate3d 3s linear infinite;
+}
+
+.molecule-atom {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #000;
+  border-radius: 50%;
+}
+
+.molecule-atom:nth-child(1) {
   top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.15),
-    rgba(0, 0, 0, 0.15) 1px,
-    transparent 1px,
-    transparent 2px
-  );
-  pointer-events: none;
-  z-index: 9999;
+  left: 14px;
 }
 
-/* CRT screen effect */
-body::after {
-  content: "";
-  position: fixed;
-  top: 0;
+.molecule-atom:nth-child(2) {
+  top: 14px;
   left: 0;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(ellipse at center, transparent 0%, rgba(0, 0, 0, 0.3) 100%);
-  pointer-events: none;
-  z-index: 9998;
+  width: 10px;
+  height: 10px;
+  background: #666;
 }
 
-/* Responsive adjustments */
+.molecule-atom:nth-child(3) {
+  top: 14px;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  background: #666;
+}
+
+@keyframes rotate3d {
+  from {
+    transform: rotateY(0deg) rotateX(0deg);
+  }
+  to {
+    transform: rotateY(360deg) rotateX(360deg);
+  }
+}
+
+/* Loader */
+.loader {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 3px solid #fff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loader-small {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #000;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Badges */
+.bg-green-500 {
+  background-color: #22c55e !important;
+}
+
+.bg-yellow-500 {
+  background-color: #eab308 !important;
+}
+
+.bg-red-500 {
+  background-color: #ef4444 !important;
+}
+
+.text-white {
+  color: #fff !important;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
-  .glitch-text {
-    font-size: 32px !important;
+  .terminal-header {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
   }
   
   .stat-value {
-    font-size: 28px;
+    font-size: 2rem;
   }
   
   .score-value {
-    font-size: 36px;
-  }
-  
-  .molecule-3d {
-    width: 40px;
-    height: 40px;
-  }
-  
-  .molecule-atom {
-    width: 15px;
-    height: 15px;
+    font-size: 2rem;
   }
 }

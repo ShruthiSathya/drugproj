@@ -145,41 +145,27 @@ function App() {
   }, [results]);
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden">
+    <div className="min-h-screen relative overflow-hidden">
       {/* Graph paper background */}
-      <div className="fixed inset-0 opacity-20 pointer-events-none">
-        <div className="absolute inset-0" style={{
-          backgroundImage: `
-            linear-gradient(rgba(0, 255, 0, 0.1) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0, 255, 0, 0.1) 1px, transparent 1px)
-          `,
-          backgroundSize: '40px 40px'
-        }}></div>
-      </div>
-
-      {/* Animated grid lines */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="grid-line-h"></div>
-        <div className="grid-line-v"></div>
-      </div>
+      <div className="graph-paper-bg"></div>
 
       <div className="container mx-auto px-4 py-8 max-w-7xl relative z-10">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-6xl font-black mb-4 text-green-400 glitch-text" data-text="DRUG REPURPOSING ENGINE">
-            🧬 DRUG REPURPOSING ENGINE
+          <h1 className="text-6xl font-black mb-4 glitch-text" data-text="Navara AI">
+            🧬 NAVARA AI
           </h1>
-          <p className="text-green-300 text-xl font-mono">
+          <p className="text-xl font-mono" style={{ letterSpacing: '0.1em' }}>
             {'>'} AI-POWERED THERAPEUTIC DISCOVERY SYSTEM {'<'}
           </p>
-          <div className="mt-4 flex justify-center gap-4">
+          <div className="mt-4 flex justify-center gap-4 flex-wrap">
             <div className="status-indicator">
               <span className="status-dot"></span>
-              <span className="text-green-400 text-sm font-mono">DATABASES: ONLINE</span>
+              <span className="text-sm font-mono font-bold">DATABASES: ONLINE</span>
             </div>
             <div className="status-indicator">
               <span className="status-dot"></span>
-              <span className="text-green-400 text-sm font-mono">AI: ACTIVE</span>
+              <span className="text-sm font-mono font-bold">AI: ACTIVE</span>
             </div>
           </div>
         </div>
@@ -192,7 +178,7 @@ function App() {
               <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
               <div className="w-3 h-3 rounded-full bg-green-500"></div>
             </div>
-            <div className="text-green-400 font-mono text-sm">
+            <div className="font-mono text-sm">
               QUERY_INTERFACE.EXE
             </div>
           </div>
@@ -200,7 +186,7 @@ function App() {
           <div className="terminal-body">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label className="block text-green-400 font-mono mb-2 text-sm">
+                <label className="block font-mono mb-2 text-sm font-bold" style={{ letterSpacing: '0.1em' }}>
                   {'>'} TARGET_DISEASE:
                 </label>
                 <input
@@ -215,7 +201,7 @@ function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-green-400 font-mono mb-2 text-sm">
+                  <label className="block font-mono mb-2 text-sm font-bold" style={{ letterSpacing: '0.1em' }}>
                     {'>'} MAX_CANDIDATES:
                   </label>
                   <input
@@ -229,7 +215,7 @@ function App() {
                 </div>
 
                 <div>
-                  <label className="block text-green-400 font-mono mb-2 text-sm">
+                  <label className="block font-mono mb-2 text-sm font-bold" style={{ letterSpacing: '0.1em' }}>
                     {'>'} MIN_SCORE_THRESHOLD:
                   </label>
                   <input
@@ -261,8 +247,8 @@ function App() {
             </form>
 
             {loadingMessage && (
-              <div className="mt-6 p-4 border-2 border-green-500 bg-black bg-opacity-50">
-                <p className="text-green-400 font-mono text-sm flex items-center gap-2">
+              <div className="mt-6 p-4 border-2 border-black bg-white">
+                <p className="font-mono text-sm flex items-center gap-2 font-bold">
                   <span className="loader-small"></span>
                   {loadingMessage}
                 </p>
@@ -270,11 +256,11 @@ function App() {
             )}
 
             {error && (
-              <div className="mt-6 p-4 border-2 border-red-500 bg-black bg-opacity-50">
-                <p className="text-red-400 font-mono text-sm font-bold mb-2">
+              <div className="mt-6 p-4 border-2 border-red-500 bg-red-50">
+                <p className="text-red-600 font-mono text-sm font-bold mb-2">
                   ❌ ERROR: {error.message}
                 </p>
-                <p className="text-yellow-400 font-mono text-xs">
+                <p className="text-yellow-600 font-mono text-xs">
                   💡 SUGGESTION: {error.suggestion}
                 </p>
               </div>
@@ -288,13 +274,13 @@ function App() {
             {/* Disease Info */}
             <div className="terminal-window">
               <div className="terminal-header">
-                <div className="text-green-400 font-mono text-sm">
+                <div className="font-mono text-sm">
                   DISEASE_ANALYSIS.DAT
                 </div>
               </div>
               
               <div className="terminal-body">
-                <h2 className="text-4xl font-black text-green-400 mb-6 font-mono glitch-text" data-text={results.disease?.name}>
+                <h2 className="text-4xl font-black mb-6 font-mono glitch-text" data-text={results.disease?.name}>
                   {results.disease?.name || diseaseName}
                 </h2>
                 
@@ -315,7 +301,7 @@ function App() {
 
                 {results.disease?.top_genes && results.disease.top_genes.length > 0 && (
                   <div className="mb-4">
-                    <h3 className="text-green-400 font-mono mb-3 text-sm">
+                    <h3 className="font-mono mb-3 text-sm font-bold" style={{ letterSpacing: '0.1em' }}>
                       {'>'} TARGET_GENES:
                     </h3>
                     <div className="flex flex-wrap gap-2">
@@ -332,31 +318,31 @@ function App() {
 
             {/* Filtered Out Drugs Section */}
             {results.filtered_count > 0 && (
-              <div className="terminal-window">
-                <div className="terminal-header">
-                  <div className="text-red-400 font-mono text-sm">
+              <div className="terminal-window" style={{ borderColor: '#dc2626' }}>
+                <div className="terminal-header" style={{ background: '#dc2626' }}>
+                  <div className="font-mono text-sm">
                     ⛔ CONTRAINDICATED_DRUGS.DAT ({results.filtered_count} FILTERED)
                   </div>
                 </div>
                 
                 <div className="terminal-body">
-                  <div className="p-4 bg-red-900 bg-opacity-20 border-2 border-red-500 rounded mb-4">
-                    <p className="text-red-400 font-mono text-sm font-bold mb-2">
+                  <div className="p-4 bg-red-50 border-2 border-red-500 mb-4">
+                    <p className="text-red-600 font-mono text-sm font-bold mb-2">
                       ⚠️ WARNING: These drugs were REMOVED due to contraindications
                     </p>
-                    <p className="text-red-300 font-mono text-xs">
+                    <p className="text-red-700 font-mono text-xs">
                       These medications could be harmful for {results.disease?.name || diseaseName}
                     </p>
                   </div>
                   
                   <div className="space-y-3">
                     {results.filtered_drugs && results.filtered_drugs.map((drug, idx) => (
-                      <div key={idx} className="p-4 bg-black bg-opacity-50 border-2 border-red-500 rounded">
+                      <div key={idx} className="p-4 bg-white border-3 border-red-500">
                         <div className="flex items-start justify-between mb-2 flex-wrap gap-2">
-                          <h3 className="text-xl font-black text-red-400 font-mono">
-                            ❌ {drug.drug_name}
+                          <h3 className="text-xl font-black text-red-600 font-mono">
+                            ❌ {drug.drug_name.toUpperCase()}
                           </h3>
-                          <span className={`px-3 py-1 rounded text-xs font-bold font-mono ${
+                          <span className={`px-3 py-1 text-xs font-bold font-mono ${
                             drug.severity === 'absolute' 
                               ? 'bg-red-600 text-white' 
                               : 'bg-yellow-600 text-white'
@@ -364,7 +350,7 @@ function App() {
                             {drug.severity?.toUpperCase()} CONTRAINDICATION
                           </span>
                         </div>
-                        <p className="text-red-300 font-mono text-sm">
+                        <p className="text-red-700 font-mono text-sm">
                           {'>'} REASON: {drug.reason}
                         </p>
                       </div>
@@ -377,18 +363,18 @@ function App() {
             {/* Drug Candidates */}
             <div className="terminal-window">
               <div className="terminal-header">
-                <div className="text-green-400 font-mono text-sm">
+                <div className="font-mono text-sm">
                   REPURPOSING_CANDIDATES.DAT
                 </div>
               </div>
               
               <div className="terminal-body">
                 {results.candidates && results.candidates.length === 0 ? (
-                  <div className="p-6 border-2 border-yellow-500 bg-black bg-opacity-50">
-                    <p className="text-yellow-400 font-mono">
+                  <div className="p-6 border-2 border-yellow-500 bg-yellow-50">
+                    <p className="text-yellow-700 font-mono font-bold">
                       ⚠️ NO CANDIDATES FOUND WITH SCORE {'>'} {minScore}
                     </p>
-                    <p className="text-green-400 font-mono text-sm mt-2">
+                    <p className="font-mono text-sm mt-2">
                       💡 Try lowering minimum score to 0.1 or 0.2
                     </p>
                   </div>
@@ -406,14 +392,14 @@ function App() {
                                 <div className="molecule-atom"></div>
                               </div>
                               
-                              <h3 className="text-3xl font-black text-green-400 font-mono">
-                                #{idx + 1} {candidate.drug_name}
+                              <h3 className="text-3xl font-black font-mono">
+                                #{idx + 1} {candidate.drug_name.toUpperCase()}
                               </h3>
-                              <span className={`px-3 py-1 rounded text-xs font-bold font-mono ${getConfidenceBadge(candidate.confidence)}`}>
+                              <span className={`px-3 py-1 text-xs font-bold font-mono ${getConfidenceBadge(candidate.confidence)}`}>
                                 {candidate.confidence?.toUpperCase() || 'N/A'} CONFIDENCE
                               </span>
                             </div>
-                            <p className="text-green-300 font-mono text-sm">
+                            <p className="font-mono text-sm">
                               {'>'} CURRENT_USE: {candidate.indication || candidate.original_indication || 'Unknown'}
                             </p>
                           </div>
@@ -431,10 +417,10 @@ function App() {
 
                         {candidate.mechanism && (
                           <div className="mb-4">
-                            <p className="text-green-400 font-mono text-xs mb-2">
+                            <p className="font-mono text-xs mb-2 font-bold" style={{ letterSpacing: '0.1em' }}>
                               {'>'} MECHANISM_OF_ACTION:
                             </p>
-                            <p className="text-green-300 font-mono text-sm p-3 bg-black bg-opacity-50 border border-green-900">
+                            <p className="font-mono text-sm p-3 bg-gray-50 border border-black">
                               {candidate.mechanism}
                             </p>
                           </div>
@@ -442,10 +428,10 @@ function App() {
 
                         {candidate.explanation && (
                           <div className="mb-4">
-                            <p className="text-green-400 font-mono text-xs mb-2">
+                            <p className="font-mono text-xs mb-2 font-bold" style={{ letterSpacing: '0.1em' }}>
                               {'>'} REPURPOSING_RATIONALE:
                             </p>
-                            <p className="text-green-300 font-mono text-sm p-3 bg-black bg-opacity-50 border border-green-900">
+                            <p className="font-mono text-sm p-3 bg-gray-50 border border-black">
                               {candidate.explanation}
                             </p>
                           </div>
@@ -480,7 +466,7 @@ function App() {
 
                         {candidate.shared_genes && candidate.shared_genes.length > 0 && (
                           <div className="mb-3">
-                            <p className="text-green-400 font-mono text-xs mb-2">
+                            <p className="font-mono text-xs mb-2 font-bold" style={{ letterSpacing: '0.1em' }}>
                               {'>'} SHARED_TARGET_GENES:
                             </p>
                             <div className="flex flex-wrap gap-2">
@@ -495,7 +481,7 @@ function App() {
 
                         {candidate.shared_pathways && candidate.shared_pathways.length > 0 && (
                           <div className="mb-4">
-                            <p className="text-green-400 font-mono text-xs mb-2">
+                            <p className="font-mono text-xs mb-2 font-bold" style={{ letterSpacing: '0.1em' }}>
                               {'>'} SHARED_BIOLOGICAL_PATHWAYS:
                             </p>
                             <div className="flex flex-wrap gap-2">
@@ -509,16 +495,16 @@ function App() {
                         )}
 
                         {/* Clinical Validation Button */}
-                        <div className="mt-4 pt-4 border-t border-green-900">
+                        <div className="mt-4 pt-4 border-t-2 border-black">
                           {!clinicalResults[idx] && (
                             <button
                               onClick={() => handleClinicalValidation(candidate, idx)}
                               disabled={validatingIndex === idx}
-                              className="w-full px-4 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-mono font-bold rounded border-2 border-cyan-400 hover:from-cyan-500 hover:to-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="w-full px-4 py-3 bg-black text-white font-mono font-bold border-3 border-black hover:bg-gray-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {validatingIndex === idx ? (
                                 <span className="flex items-center justify-center gap-2">
-                                  <span className="loader-small"></span>
+                                  <span className="loader"></span>
                                   VALIDATING CLINICALLY...
                                 </span>
                               ) : (
@@ -530,15 +516,15 @@ function App() {
                           {/* Clinical Validation Results */}
                           {clinicalResults[idx] && !clinicalResults[idx].error && (
                             <div className="mt-4 space-y-4">
-                              <div className="p-4 bg-gradient-to-r from-cyan-900 to-blue-900 border-2 border-cyan-400 rounded">
-                                <h4 className="text-cyan-300 font-mono font-bold mb-3 flex items-center gap-2">
+                              <div className="p-4 bg-blue-50 border-3 border-blue-600">
+                                <h4 className="text-blue-900 font-mono font-bold mb-3 flex items-center gap-2" style={{ letterSpacing: '0.05em' }}>
                                   🏥 CLINICAL VALIDATION RESULTS
                                 </h4>
                                 
                                 {/* Risk Level */}
-                                <div className="mb-4 p-3 bg-black bg-opacity-50 rounded border-2" style={{borderColor: getRiskColor(clinicalResults[idx].risk_level)}}>
+                                <div className="mb-4 p-3 bg-white border-2" style={{borderColor: getRiskColor(clinicalResults[idx].risk_level)}}>
                                   <div className="flex items-center justify-between">
-                                    <span className="text-white font-mono text-sm">RISK LEVEL:</span>
+                                    <span className="font-mono text-sm font-bold">RISK LEVEL:</span>
                                     <span 
                                       className="font-mono font-black text-xl"
                                       style={{color: getRiskColor(clinicalResults[idx].risk_level)}}
@@ -549,19 +535,19 @@ function App() {
                                 </div>
 
                                 {/* Recommendation */}
-                                <div className="mb-4 p-3 bg-black bg-opacity-50 rounded">
-                                  <p className="text-cyan-200 font-mono text-sm font-bold">
+                                <div className="mb-4 p-3 bg-white border-2 border-black">
+                                  <p className="text-blue-900 font-mono text-sm font-bold">
                                     {clinicalResults[idx].recommendation}
                                   </p>
                                 </div>
 
                                 {/* Evidence Summary */}
                                 <div className="mb-4">
-                                  <p className="text-cyan-300 font-mono text-xs mb-2">EVIDENCE SUMMARY:</p>
+                                  <p className="text-blue-900 font-mono text-xs mb-2 font-bold" style={{ letterSpacing: '0.1em' }}>EVIDENCE SUMMARY:</p>
                                   <div className="space-y-1">
                                     {clinicalResults[idx].evidence_summary?.map((item, i) => (
-                                      <p key={i} className="text-cyan-100 font-mono text-xs">
-                                        {item}
+                                      <p key={i} className="text-blue-800 font-mono text-xs">
+                                        • {item}
                                       </p>
                                     ))}
                                   </div>
@@ -571,15 +557,15 @@ function App() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                   {/* Clinical Trials */}
                                   {clinicalResults[idx].clinical_trials && (
-                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
-                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">📋 CLINICAL TRIALS:</p>
-                                      <p className="text-cyan-100 font-mono text-xs">
+                                    <div className="p-3 bg-white border-2 border-black">
+                                      <p className="font-mono text-xs font-bold mb-2" style={{ letterSpacing: '0.1em' }}>📋 CLINICAL TRIALS:</p>
+                                      <p className="font-mono text-xs">
                                         {clinicalResults[idx].clinical_trials.summary || 'No trials found'}
                                       </p>
                                       {clinicalResults[idx].clinical_trials.trials?.length > 0 && (
                                         <div className="mt-2 space-y-1">
                                           {clinicalResults[idx].clinical_trials.trials.slice(0, 3).map((trial, i) => (
-                                            <div key={i} className="text-cyan-200 font-mono text-xs">
+                                            <div key={i} className="font-mono text-xs">
                                               • {trial.phase} - {trial.status}
                                             </div>
                                           ))}
@@ -590,9 +576,9 @@ function App() {
 
                                   {/* Literature */}
                                   {clinicalResults[idx].literature_evidence && (
-                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
-                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">📚 LITERATURE:</p>
-                                      <p className="text-cyan-100 font-mono text-xs">
+                                    <div className="p-3 bg-white border-2 border-black">
+                                      <p className="font-mono text-xs font-bold mb-2" style={{ letterSpacing: '0.1em' }}>📚 LITERATURE:</p>
+                                      <p className="font-mono text-xs">
                                         {clinicalResults[idx].literature_evidence.summary || 'No literature found'}
                                       </p>
                                     </div>
@@ -600,9 +586,9 @@ function App() {
 
                                   {/* Safety */}
                                   {clinicalResults[idx].safety_signals && (
-                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
-                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">⚠️ SAFETY:</p>
-                                      <p className="text-cyan-100 font-mono text-xs">
+                                    <div className="p-3 bg-white border-2 border-black">
+                                      <p className="font-mono text-xs font-bold mb-2" style={{ letterSpacing: '0.1em' }}>⚠️ SAFETY:</p>
+                                      <p className="font-mono text-xs">
                                         {clinicalResults[idx].safety_signals.summary || 'No safety data'}
                                       </p>
                                     </div>
@@ -610,9 +596,9 @@ function App() {
 
                                   {/* Mechanism */}
                                   {clinicalResults[idx].mechanism_analysis && (
-                                    <div className="p-3 bg-black bg-opacity-50 rounded border border-cyan-700">
-                                      <p className="text-cyan-300 font-mono text-xs font-bold mb-2">⚙️ MECHANISM:</p>
-                                      <p className="text-cyan-100 font-mono text-xs">
+                                    <div className="p-3 bg-white border-2 border-black">
+                                      <p className="font-mono text-xs font-bold mb-2" style={{ letterSpacing: '0.1em' }}>⚙️ MECHANISM:</p>
+                                      <p className="font-mono text-xs">
                                         {clinicalResults[idx].mechanism_analysis.summary || 'Unknown'}
                                       </p>
                                     </div>
@@ -624,8 +610,8 @@ function App() {
 
                           {/* Error Display */}
                           {clinicalResults[idx]?.error && (
-                            <div className="mt-4 p-4 bg-red-900 bg-opacity-30 border-2 border-red-500 rounded">
-                              <p className="text-red-400 font-mono text-sm">
+                            <div className="mt-4 p-4 bg-red-50 border-2 border-red-500">
+                              <p className="text-red-600 font-mono text-sm font-bold">
                                 ❌ Validation Error: {clinicalResults[idx].error}
                               </p>
                             </div>
@@ -643,7 +629,7 @@ function App() {
 
       {/* Footer */}
       <div className="text-center py-8 relative z-10">
-        <p className="text-green-400 font-mono text-sm">
+        <p className="font-mono text-sm font-bold" style={{ letterSpacing: '0.05em' }}>
           POWERED BY: OpenTargets • ChEMBL • DGIdb • ClinicalTrials.gov • PubMed • OpenFDA
         </p>
       </div>

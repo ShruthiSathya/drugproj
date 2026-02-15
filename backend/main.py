@@ -109,17 +109,20 @@ async def analyze_disease(request: dict):
             if 'mechanism' not in candidate:
                 candidate['mechanism'] = ''
         
-        # ⭐ NEW: Apply safety filter
+        # ⭐ FIXED: Apply safety filter with CORRECT settings
         safety_filter = DrugSafetyFilter()
         
         original_count = len(candidates)
         
         try:
+            # FIXED: Set remove_relative=True to filter out ALL contraindicated drugs
+            # This is critical for safety - "relative" contraindications like olanzapine
+            # for diabetes or beta-blockers for asthma are still dangerous!
             safe_candidates, filtered_out = await safety_filter.filter_candidates(
                 candidates=candidates,
                 disease_name=disease_name,
                 remove_absolute=True,   # Remove absolutely contraindicated
-                remove_relative=False   # Keep relatively contraindicated (with warning)
+                remove_relative=True    # FIXED: Also remove relatively contraindicated (was False!)
             )
             
             # Limit to requested max_results after filtering
