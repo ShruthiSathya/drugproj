@@ -115,7 +115,7 @@ async def analyze_disease(request: dict):
         original_count = len(candidates)
         
         try:
-            safe_candidates, filtered_out = safety_filter.filter_candidates(
+            safe_candidates, filtered_out = await safety_filter.filter_candidates(
                 candidates=candidates,
                 disease_name=disease_name,
                 remove_absolute=True,   # Remove absolutely contraindicated
