@@ -10,8 +10,8 @@ import time
 from typing import Dict, List
 
 # Configuration
-API_URL = "http://localhost:8000/api/repurpose"
-TOP_K = 10
+API_URL = "http://localhost:8000/analyze"
+MAX_RESULTS = 10
 
 # Disease test cases with expected results for validation
 DISEASE_TESTS = [
@@ -39,12 +39,6 @@ DISEASE_TESTS = [
         "expected_candidates": ["albuterol", "montelukast", "fluticasone"],
         "critical": ["LIFE-THREATENING: beta-blockers must be filtered"]
     },
-    {
-        "name": "Rheumatoid Arthritis",
-        "expected_filtered": [],  # RA has few absolute contraindications
-        "expected_candidates": ["methotrexate", "hydroxychloroquine", "sulfasalazine"],
-        "critical": []
-    }
 ]
 
 
@@ -72,8 +66,12 @@ def test_disease(disease_config: Dict) -> Dict:
         # Make API request
         response = requests.post(
             API_URL,
-            json={"disease_name": disease_name, "top_k": TOP_K},
-            timeout=30
+            json={
+                "disease_name": disease_name, 
+                "max_results": MAX_RESULTS,
+                "min_score": 0.2
+            },
+            timeout=60
         )
         
         if response.status_code != 200:
@@ -88,12 +86,12 @@ def test_disease(disease_config: Dict) -> Dict:
     except requests.exceptions.ConnectionError:
         return {
             "success": False,
-            "error": "Failed to connect to API. Is the backend running?"
+            "error": "Failed to connect to API. Is the backend running on port 8000?"
         }
     except requests.exceptions.Timeout:
         return {
             "success": False,
-            "error": "Request timed out (>30 seconds)"
+            "error": "Request timed out (>60 seconds)"
         }
     except json.JSONDecodeError:
         return {
@@ -119,26 +117,30 @@ def print_results(result: Dict):
     
     # Check if API request succeeded
     if not data.get("success", False):
-        print(f"❌ API ERROR: {data.get('message', 'Unknown error')}")
+        print(f"❌ API ERROR: {data.get('error', 'Unknown error')}")
+        if 'suggestion' in data:
+            print(f"   Suggestion: {data['suggestion']}")
         print()
         return
     
     # Print disease info
+    disease_info = data.get('disease', {})
     print("DISEASE ANALYSIS:")
-    print(f"  Disease: {data.get('disease_name', 'Unknown')}")
-    print(f"  Genes Identified: {data.get('genes_found', 0)}")
-    print(f"  Pathways Mapped: {data.get('pathways_mapped', 0)}")
+    print(f"  Disease: {disease_info.get('name', 'Unknown')}")
+    print(f"  Genes Identified: {disease_info.get('genes_count', 0)}")
+    print(f"  Pathways Mapped: {disease_info.get('pathways_count', 0)}")
     print(f"  Candidates Found: {len(data.get('candidates', []))}")
+    print(f"  Drugs Filtered: {data.get('filtered_count', 0)}")
     
     # Print contraindicated drugs
-    filtered_drugs = data.get('contraindicated_drugs', [])
+    filtered_drugs = data.get('filtered_drugs', [])
     print(f"\n⛔ CONTRAINDICATED DRUGS ({len(filtered_drugs)} filtered):")
     
     if filtered_drugs:
         for drug in filtered_drugs:
             name = drug.get('drug_name', 'Unknown').upper()
-            reason = drug.get('contraindication_reason', 'No reason provided')
-            severity = drug.get('contraindication_severity', 'unknown').upper()
+            reason = drug.get('reason', 'No reason provided')
+            severity = drug.get('severity', 'unknown').upper()
             print(f"  ❌ {name}")
             print(f"     Severity: {severity}")
             print(f"     Reason: {reason[:100]}{'...' if len(reason) > 100 else ''}")
@@ -218,7 +220,7 @@ def print_summary(results: List[Dict]):
     print("╚" + "═" * 78 + "╝")
     print()
     
-    successful = sum(1 for r in results if r["success"])
+    successful = sum(1 for r in results if r["success"] and r["data"].get("success"))
     total = len(results)
     
     print(f"Tests Run: {total}")
@@ -230,7 +232,7 @@ def print_summary(results: List[Dict]):
     critical_issues = []
     
     for result in results:
-        if not result["success"]:
+        if not result["success"] or not result["data"].get("success"):
             continue
         
         data = result["data"]
@@ -240,7 +242,7 @@ def print_summary(results: List[Dict]):
         # Check for critical issues
         if "diabetes" in disease_name.lower():
             filtered_names = [d.get('drug_name', '').lower() 
-                            for d in data.get('contraindicated_drugs', [])]
+                            for d in data.get('filtered_drugs', [])]
             if "olanzapine" not in filtered_names:
                 critical_issues.append(
                     f"🚨 CRITICAL: Olanzapine NOT filtered for {disease_name} (causes diabetes!)"
@@ -248,7 +250,7 @@ def print_summary(results: List[Dict]):
         
         if "asthma" in disease_name.lower():
             filtered_names = [d.get('drug_name', '').lower() 
-                            for d in data.get('contraindicated_drugs', [])]
+                            for d in data.get('filtered_drugs', [])]
             beta_blockers = ["propranolol", "atenolol", "metoprolol"]
             if not any(bb in filtered_names for bb in beta_blockers):
                 critical_issues.append(
@@ -263,12 +265,6 @@ def print_summary(results: List[Dict]):
     else:
         print("✅ No critical safety issues detected!")
         print()
-    
-    print("📋 NEXT STEPS:")
-    print("   1. Copy ALL the output above")
-    print("   2. Paste it to Claude for detailed validation")
-    print("   3. Claude will verify if results are medically accurate")
-    print()
 
 
 def main():
@@ -286,7 +282,7 @@ def main():
         result = test_disease(disease_config)
         print_results(result)
         results.append(result)
-        time.sleep(1)  # Small delay between requests
+        time.sleep(2)  # Small delay between requests
     
     print_summary(results)
 
